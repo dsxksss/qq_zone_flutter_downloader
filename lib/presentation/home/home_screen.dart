@@ -49,6 +49,63 @@ class _HomeScreenState extends ConsumerState<HomeScreen> { // 创建 State 类
     }
   }
 
+  // 处理登出
+  Future<void> _handleLogout() async {
+    try {
+      // 显示加载指示器
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('正在登出'),
+          content: const SizedBox(
+            height: 100,
+            child: Center(child: FProgress()),
+          ),
+        ),
+      );
+
+      // 清除登录状态
+      final qzoneService = ref.read(qZoneServiceProvider);
+      await qzoneService.clearLoginState();
+      
+      // 关闭加载对话框
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+      
+      // 跳转到登录页面
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+          (Route<dynamic> route) => false,
+        );
+      }
+    } catch (e) {
+      // 关闭加载对话框
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+      
+      // 显示错误
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('登出失败'),
+            content: Text('发生错误：${e.toString()}'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return FScaffold(
@@ -69,12 +126,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> { // 创建 State 类
                 ),
                 FButton(
                     child: const Text('登出'),
-                    onPress: () {
-                      Navigator.of(context).pushAndRemoveUntil(
-                        MaterialPageRoute(builder: (context) => const LoginScreen()),
-                        (Route<dynamic> route) => false,
-                      );
-                    }
+                    onPress: _handleLogout, // 使用新的登出方法
                 ),
               ],
             ),
@@ -92,33 +144,43 @@ class _HomeScreenState extends ConsumerState<HomeScreen> { // 创建 State 类
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                 child: Text('加载相册失败: $_albumError', style: const TextStyle(color: Colors.red)),
               )
-            else if (_albums.isEmpty && !_isLoadingAlbums) // 且不是因为正在加载而为空
-               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: const Text('暂无相册，或点击按钮加载。'),
-              )
-            else
+            // 显示相册列表
+            else if (_albums.isNotEmpty)
               Expanded(
                 child: ListView.builder(
                   itemCount: _albums.length,
                   itemBuilder: (context, index) {
                     final album = _albums[index];
-                    return FCard(
+                    return Card(
+                      margin: const EdgeInsets.symmetric(vertical: 8.0),
                       child: ListTile(
-                        leading: album.coverUrl != null 
-                            ? Image.network(album.coverUrl!, width: 50, height: 50, fit: BoxFit.cover, errorBuilder: (c, o, s) => const Icon(Icons.image_not_supported, size: 40,)) 
-                            : const Icon(Icons.photo_album, size: 40),
                         title: Text(album.name),
-                        subtitle: Text('共 ${album.photoCount} 张照片'),
+                        subtitle: Text('照片数量: ${album.photoCount}'),
+                        leading: album.coverUrl != null
+                            ? SizedBox(
+                                width: 50,
+                                height: 50,
+                                child: Image.network(
+                                  album.coverUrl!,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return const Icon(Icons.image);
+                                  },
+                                ),
+                              )
+                            : const Icon(Icons.photo_album),
                         onTap: () {
-                          // TODO: 点击相册，导航到照片列表页
-                          if (kDebugMode) {
-                            print('点击了相册: ${album.name} (ID: ${album.id})');
-                          }
+                          // TODO: 实现相册详情页面
                         },
-                      )
+                      ),
                     );
                   },
+                ),
+              )
+            else if (!_isLoadingAlbums)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16.0),
+                  child: Text('暂无相册数据，请点击上方按钮加载'),
                 ),
               ),
           ],

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart'; // 如果使用 Riverpo
 
 // 假设您的登录界面会在这里
 import 'package:qq_zone_flutter_downloader/presentation/login/login_screen.dart';
+import 'package:qq_zone_flutter_downloader/presentation/splash/splash_screen.dart'; // 导入启动屏幕
 // import 'package:qq_zone_flutter_downloader/app_theme.dart'; // 如果你创建了 app_theme.dart
 
 void main() {
@@ -32,7 +33,7 @@ class Application extends StatelessWidget {
         data: fTheme,
         child: child!,
       ),
-      home: const LoginScreen(),
+      home: const SplashScreen(), // 更改为启动屏幕
       debugShowCheckedModeBanner: false,
     );
   }

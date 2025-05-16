@@ -12,6 +12,9 @@ import 'package:qq_zone_flutter_downloader/core/utils/qzone_algorithms.dart';
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart'; // Import CookieManager
+import 'package:path_provider/path_provider.dart'; // 导入path_provider
+import 'package:path/path.dart' as p; // 导入path包
+import 'package:shared_preferences/shared_preferences.dart'; // 导入shared_preferences
 
 class QZoneService {
   late Dio _dio;
@@ -19,6 +22,7 @@ class QZoneService {
   String? _gTk;
   String? _loggedInUin; // QQ号, 不带 'o'
   String? _rawUin; // 原始uin, 可能带 'o'
+  bool _isInitialized = false;
 
   QZoneService() {
     if (kDebugMode) {
@@ -28,16 +32,14 @@ class QZoneService {
   }
 
   Future<void> _initializeService() async {
-    // Initialize CookieJar, preferably PersistCookieJar for persistence
-    // Directory appDocDir = await getApplicationDocumentsDirectory();
-    // String appDocPath = appDocDir.path;
-    // final cookiePath = p.join(appDocPath, '.cookies');
-    // _cookieJar = PersistCookieJar(
-    //   ignoreExpires: true, // Save cookies till they are explicitly cleared or overwritten
-    //   storage: FileStorage(cookiePath),
-    // );
-    // Using a non-persistent CookieJar for now to avoid async in constructor or complex init
-    _cookieJar = CookieJar();
+    // 初始化使用持久化的CookieJar
+    final Directory appDocDir = await getApplicationDocumentsDirectory();
+    final String appDocPath = appDocDir.path;
+    final cookiePath = p.join(appDocPath, '.cookies');
+    _cookieJar = PersistCookieJar(
+      ignoreExpires: true, // 保存Cookie直到它们被明确清除或覆盖
+      storage: FileStorage(cookiePath),
+    );
 
     final options = BaseOptions(
       connectTimeout: const Duration(seconds: 20),
@@ -87,7 +89,81 @@ class QZoneService {
         responseBody: true,
         requestHeader: true,
         responseHeader: true));
+
+    // 尝试从SharedPreferences恢复登录状态
+    await _tryRestoreLoginState();
+    _isInitialized = true;
   }
+
+  Future<bool> _tryRestoreLoginState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _gTk = prefs.getString('g_tk');
+      _loggedInUin = prefs.getString('logged_in_uin');
+      _rawUin = prefs.getString('raw_uin');
+      
+      if (_gTk != null && _loggedInUin != null) {
+        if (kDebugMode) {
+          print("[QZoneService] 成功恢复登录状态: g_tk=$_gTk, uin=$_loggedInUin");
+        }
+        return true;
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print("[QZoneService] 恢复登录状态失败: $e");
+      }
+    }
+    return false;
+  }
+
+  Future<void> _saveLoginState() async {
+    try {
+      if (_gTk != null && _loggedInUin != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('g_tk', _gTk!);
+        await prefs.setString('logged_in_uin', _loggedInUin!);
+        if (_rawUin != null) {
+          await prefs.setString('raw_uin', _rawUin!);
+        }
+        if (kDebugMode) {
+          print("[QZoneService] 成功保存登录状态");
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print("[QZoneService] 保存登录状态失败: $e");
+      }
+    }
+  }
+
+  Future<void> clearLoginState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('g_tk');
+      await prefs.remove('logged_in_uin');
+      await prefs.remove('raw_uin');
+      _gTk = null;
+      _loggedInUin = null;
+      _rawUin = null;
+      
+      // 清除所有Cookie
+      await _cookieJar.deleteAll();
+      
+      if (kDebugMode) {
+        print("[QZoneService] 已清除登录状态和Cookie");
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print("[QZoneService] 清除登录状态失败: $e");
+      }
+    }
+  }
+
+  // 判断用户是否已登录
+  bool get isLoggedIn => _gTk != null && _loggedInUin != null;
+  
+  // 判断服务是否已初始化完成
+  bool get isInitialized => _isInitialized;
 
   String? _extractCookieValue(Headers headers, String cookieName) {
     final setCookieHeader = headers.map['set-cookie'];
@@ -188,6 +264,9 @@ class QZoneService {
       } else {
         throw QZoneApiException("Failed to retrieve UIN from cookies after login redirect.");
       }
+      
+      // 保存登录状态
+      await _saveLoginState();
 
     } on DioException catch (e) {
       if (kDebugMode) {

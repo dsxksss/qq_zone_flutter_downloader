@@ -10,6 +10,7 @@ import 'package:qq_zone_flutter_downloader/core/models/login_poll_result.dart'; 
 import 'package:qq_zone_flutter_downloader/core/models/qzone_api_exception.dart'; // Import QZoneLoginException
 import 'package:qq_zone_flutter_downloader/presentation/home/home_screen.dart'; // Import HomeScreen
 import 'package:qq_zone_flutter_downloader/core/providers/service_providers.dart'; // Import provider
+import 'package:flutter/foundation.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -27,10 +28,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   String? errorMessage;
 
   StreamSubscription<LoginPollResult?>? _pollSubscription;
-
+  
   @override
   void initState() {
     super.initState();
+    // 检查是否已经登录
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkIfAlreadyLoggedIn();
+    });
+  }
+  
+  Future<void> _checkIfAlreadyLoggedIn() async {
+    final qzoneService = ref.read(qZoneServiceProvider);
+    if (qzoneService.isLoggedIn) {
+      if (kDebugMode) {
+        print("[LoginScreen] 用户已登录，自动跳转到主页");
+      }
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => HomeScreen(
+              nickname: qzoneService.loggedInUin ?? "用户",
+            ),
+          ),
+        );
+      }
+    }
   }
 
   @override

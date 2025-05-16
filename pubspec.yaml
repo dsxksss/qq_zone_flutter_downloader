@@ -39,6 +39,7 @@ dependencies:
   dio: ^5.8.0+1 # 确保这是你项目中实际使用的 Dio 版本
   cookie_jar: ^4.0.8 # 添加 cookie_jar
   dio_cookie_manager: ^3.1.1 # 添加 dio_cookie_manager
+  shared_preferences: ^2.2.2 # 添加shared_preferences用于存储登录信息
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
