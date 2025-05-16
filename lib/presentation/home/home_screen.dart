@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart'; // 导入 Riverpod
 import 'package:qq_zone_flutter_downloader/core/models/album.dart'; // 导入 Album
 import 'package:qq_zone_flutter_downloader/core/providers/service_providers.dart'; // 导入 Provider
 import 'package:qq_zone_flutter_downloader/presentation/login/login_screen.dart';
+import 'package:qq_zone_flutter_downloader/presentation/album/album_details_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget { // 修改为 ConsumerStatefulWidget
   final String? nickname;
@@ -19,6 +20,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> { // 创建 State 类
   List<Album> _albums = [];
   bool _isLoadingAlbums = false;
   String? _albumError;
+
+  @override
+  void initState() {
+    super.initState();
+    // 页面加载后自动加载相册列表
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadAlbums();
+    });
+  }
 
   Future<void> _loadAlbums() async {
     setState(() {
@@ -47,6 +57,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> { // 创建 State 类
         });
       }
     }
+  }
+  
+  // 打开相册详情
+  void _openAlbumDetails(Album album) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => AlbumDetailsScreen(album: album),
+      ),
+    );
   }
 
   // 处理登出
@@ -131,10 +150,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> { // 创建 State 类
               ],
             ),
             const SizedBox(height: 20),
-            FButton(
-              child: const Text('加载相册列表'),
-              onPress: _isLoadingAlbums ? null : _loadAlbums, // 加载时禁用按钮
-              // icon: _isLoadingAlbums ? const FSpinner() : null, // 可选：加载时显示Spinner
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  '相册列表',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                FButton(
+                  child: const Text('刷新'),
+                  onPress: _isLoadingAlbums ? null : _loadAlbums,
+                ),
+              ],
             ),
             const SizedBox(height: 10),
             if (_isLoadingAlbums)
@@ -168,9 +195,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> { // 创建 State 类
                                 ),
                               )
                             : const Icon(Icons.photo_album),
-                        onTap: () {
-                          // TODO: 实现相册详情页面
-                        },
+                        onTap: () => _openAlbumDetails(album),
                       ),
                     );
                   },
@@ -180,7 +205,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> { // 创建 State 类
               const Center(
                 child: Padding(
                   padding: EdgeInsets.symmetric(vertical: 16.0),
-                  child: Text('暂无相册数据，请点击上方按钮加载'),
+                  child: Text('暂无相册数据，请点击刷新按钮重试'),
                 ),
               ),
           ],

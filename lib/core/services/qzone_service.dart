@@ -7,6 +7,7 @@ import 'package:qq_zone_flutter_downloader/core/constants.dart';
 import 'package:qq_zone_flutter_downloader/core/models/login_qr_result.dart';
 import 'package:qq_zone_flutter_downloader/core/models/login_poll_result.dart';
 import 'package:qq_zone_flutter_downloader/core/models/album.dart'; // 导入 Album 模型
+import 'package:qq_zone_flutter_downloader/core/models/photo.dart'; // 导入 Photo 模型
 import 'package:qq_zone_flutter_downloader/core/models/qzone_api_exception.dart'; // 导入 QZoneApiException
 import 'package:qq_zone_flutter_downloader/core/utils/qzone_algorithms.dart';
 import 'package:dio/dio.dart';
@@ -532,7 +533,7 @@ class QZoneService {
   }
 
   // TODO: Implement finalizeLogin (credential check)
-  Future<List<Album>> getAlbumList({String? targetUinOverride}) async {
+  Future<List<Album>> getAlbumList({String? targetUinOverride, int retryCount = 2}) async {
     // Use the stored _loggedInUin and _gTk
     if (_loggedInUin == null || _gTk == null) {
       throw QZoneApiException("Not logged in or g_tk/uin not available. Cannot fetch albums.");
@@ -550,49 +551,65 @@ class QZoneService {
     int pageStart = 0;
     const int pageNum = 30; // As per Go code
     bool hasMore = true;
+    int currentRetry = 0;
 
     while (hasMore) {
-      // Construct the URL based on Go code's GetAlbumList
-      // String url = QZoneApiConstants.getAlbumListUrl(hostUin: hostUin, uin: uin, gtk: gtk, pageStart: pageStart, pageNum: pageNum);
-      // From Go code: "https://user.qzone.qq.com/proxy/domain/photo.qzone.qq.com/fcgi-bin/fcg_list_album_v3?g_tk=%v&callback=shine_Callback&hostUin=%v&uin=%v&appid=4&inCharset=utf-8&outCharset=utf-8&source=qzone&plat=qzone&format=jsonp&notice=0&filter=1&handset=4&pageNumModeSort=40&pageNumModeClass=15&needUserInfo=1&idcNum=4&mode=2&pageStart=%d&pageNum=%d&callbackFun=shine"
-      final Map<String, dynamic> params = {
-        'g_tk': gtk,
-        'callback': 'shine_Callback', // Placeholder, will be stripped
-        'hostUin': hostUin,
-        'uin': uin,
-        'appid': '4',
-        'inCharset': 'utf-8',
-        'outCharset': 'utf-8',
-        'source': 'qzone',
-        'plat': 'qzone',
-        'format': 'jsonp',
-        'notice': '0',
-        'filter': '1',
-        'handset': '4',
-        'pageNumModeSort': '40',
-        'pageNumModeClass': '15',
-        'needUserInfo': '1',
-        'idcNum': '4',
-        'mode': '2', // Important from Go code
-        'pageStart': pageStart.toString(),
-        'pageNum': pageNum.toString(),
-        'callbackFun': 'shine', // Callback function name
-      };
-
-      final uri = Uri.parse('https://user.qzone.qq.com/proxy/domain/photo.qzone.qq.com/fcgi-bin/fcg_list_album_v3').replace(queryParameters: params);
-      final url = uri.toString();
-
-      if (kDebugMode) {
-        print("[QZoneService] Fetching albums (page): $url");
-      }
-
       try {
+        // Construct the URL based on Go code's GetAlbumList
+        // String url = QZoneApiConstants.getAlbumListUrl(hostUin: hostUin, uin: uin, gtk: gtk, pageStart: pageStart, pageNum: pageNum);
+        // From Go code: "https://user.qzone.qq.com/proxy/domain/photo.qzone.qq.com/fcgi-bin/fcg_list_album_v3?g_tk=%v&callback=shine_Callback&hostUin=%v&uin=%v&appid=4&inCharset=utf-8&outCharset=utf-8&source=qzone&plat=qzone&format=jsonp&notice=0&filter=1&handset=4&pageNumModeSort=40&pageNumModeClass=15&needUserInfo=1&idcNum=4&mode=2&pageStart=%d&pageNum=%d&callbackFun=shine"
+        final Map<String, dynamic> params = {
+          'g_tk': gtk,
+          'callback': 'shine_Callback', // Placeholder, will be stripped
+          'hostUin': hostUin,
+          'uin': uin,
+          'appid': '4',
+          'inCharset': 'utf-8',
+          'outCharset': 'utf-8',
+          'source': 'qzone',
+          'plat': 'qzone',
+          'format': 'jsonp',
+          'notice': '0',
+          'filter': '1',
+          'handset': '4',
+          'pageNumModeSort': '40',
+          'pageNumModeClass': '15',
+          'needUserInfo': '1',
+          'idcNum': '4',
+          'mode': '2', // Important from Go code
+          'pageStart': pageStart.toString(),
+          'pageNum': pageNum.toString(),
+          'callbackFun': 'shine', // Callback function name
+        };
+
+        final uri = Uri.parse('https://user.qzone.qq.com/proxy/domain/photo.qzone.qq.com/fcgi-bin/fcg_list_album_v3').replace(queryParameters: params);
+        final url = uri.toString();
+
+        if (kDebugMode) {
+          print("[QZoneService] Fetching albums (page): $url");
+        }
+
         Response response = await _dio.get(
           url,
           options: Options(responseType: ResponseType.plain), // Get as plain text for JSONP
         );
 
         String responseBody = response.data.toString().trim(); // Trim whitespace
+        
+        // 检查是否403错误
+        if (response.statusCode == 403) {
+          if (currentRetry < retryCount) {
+            currentRetry++;
+            if (kDebugMode) {
+              print("[QZoneService] 收到403错误，重试第$currentRetry次 (共$retryCount次)");
+            }
+            // 重试前等待一段时间
+            await Future.delayed(Duration(seconds: 2));
+            continue;
+          } else {
+            throw QZoneApiException("获取相册列表失败，服务器返回403禁止访问");
+          }
+        }
 
         // More robust JSONP stripping
         int startIndex = responseBody.indexOf('(');
@@ -604,12 +621,39 @@ class QZoneService {
             if (kDebugMode) {
                 print("[QZoneService WARN] Could not find valid JSONP parentheses. Raw response (after trim): $responseBody");
             }
+            
+            // 尝试重试
+            if (currentRetry < retryCount && responseBody.isEmpty) {
+              currentRetry++;
+              if (kDebugMode) {
+                print("[QZoneService] 响应解析失败，重试第$currentRetry次 (共$retryCount次)");
+              }
+              // 重试前等待一段时间
+              await Future.delayed(Duration(seconds: 2));
+              continue;
+            }
+            
             // If parentheses are not found, it might be plain JSON or an error string.
             // We will let jsonDecode attempt to parse it. If it fails, it will throw a FormatException.
         }
         
         if (kDebugMode) {
             print("[QZoneService DEBUG] JSONP stripped body for decode: $responseBody");
+        }
+
+        // 如果响应体为空，可能需要重试
+        if (responseBody.isEmpty) {
+          if (currentRetry < retryCount) {
+            currentRetry++;
+            if (kDebugMode) {
+              print("[QZoneService] 响应体为空，重试第$currentRetry次 (共$retryCount次)");
+            }
+            // 重试前等待一段时间
+            await Future.delayed(Duration(seconds: 2));
+            continue;
+          } else {
+            throw QZoneApiException("获取相册列表失败，响应内容为空");
+          }
         }
 
         final Map<String, dynamic> jsonData = jsonDecode(responseBody);
@@ -672,6 +716,9 @@ class QZoneService {
         } else {
           hasMore = false;
         }
+        
+        // 成功获取一页数据后，重置重试计数
+        currentRetry = 0;
 
       } on DioException catch (e,s) { // Added stack trace
           if (kDebugMode) {
@@ -680,6 +727,17 @@ class QZoneService {
             print("[QZoneService ERROR] DioException RuntimeType: ${e.runtimeType}");
             print("[QZoneService ERROR] DioException StackTrace: $s");
           }
+          
+          // 对网络错误进行重试
+          if (currentRetry < retryCount) {
+            currentRetry++;
+            if (kDebugMode) {
+              print("[QZoneService] 网络请求失败，重试第$currentRetry次 (共$retryCount次)");
+            }
+            await Future.delayed(Duration(seconds: 2));
+            continue;
+          }
+          
         throw QZoneApiException('Network error while fetching album list page: ${e.message}', underlyingError: e);
       } catch (e, s) { // Added stack trace
         if (kDebugMode) {
@@ -687,6 +745,17 @@ class QZoneService {
             print("[QZoneService ERROR] RuntimeType: ${e.runtimeType}");
             print("[QZoneService ERROR] StackTrace: $s");
         }
+        
+        // 对解析错误进行重试
+        if (currentRetry < retryCount) {
+          currentRetry++;
+          if (kDebugMode) {
+            print("[QZoneService] 数据处理失败，重试第$currentRetry次 (共$retryCount次)");
+          }
+          await Future.delayed(Duration(seconds: 2));
+          continue;
+        }
+        
         throw QZoneApiException('Unexpected error while fetching or parsing album list page: ${e.toString()}', underlyingError: e);
       }
     }
@@ -709,5 +778,206 @@ class QZoneService {
   }
 
   // TODO: Implement getPhotoList
+  Future<List<Photo>> getPhotoList({
+    required String albumId,
+    String? targetUinOverride,
+    int retryCount = 2
+  }) async {
+    // 检查登录状态
+    if (_loggedInUin == null || _gTk == null) {
+      throw QZoneApiException("Not logged in or g_tk/uin not available. Cannot fetch photos.");
+    }
+
+    final String hostUin = targetUinOverride ?? _loggedInUin!;
+    final String uin = _loggedInUin!;
+    final String gtk = _gTk!;
+    
+    List<Photo> allPhotos = [];
+    int pageStart = 0;
+    const int pageNum = 30;
+    bool hasMore = true;
+    int currentRetry = 0;
+
+    while (hasMore) {
+      try {
+        // 构建请求参数
+        final Map<String, dynamic> params = {
+          'g_tk': gtk,
+          'callback': 'shine_Callback',
+          'hostUin': hostUin,
+          'uin': uin,
+          'appid': '4',
+          'inCharset': 'utf-8',
+          'outCharset': 'utf-8',
+          'source': 'qzone',
+          'plat': 'qzone',
+          'format': 'jsonp',
+          'notice': '0',
+          'filter': '1',
+          'handset': '4',
+          'topicId': albumId,
+          'pageStart': pageStart.toString(),
+          'pageNum': pageNum.toString(),
+          'callbackFun': 'shine',
+          'needUserInfo': '1',
+          'singleurl': '1', // 获取单张原图URL
+          'mode': '0', // 列表模式
+        };
+
+        final uri = Uri.parse('https://user.qzone.qq.com/proxy/domain/photo.qzone.qq.com/fcgi-bin/cgi_list_photo').replace(queryParameters: params);
+        final url = uri.toString();
+
+        if (kDebugMode) {
+          print("[QZoneService] 获取相册照片 (page): $url");
+        }
+
+        Response response = await _dio.get(
+          url,
+          options: Options(responseType: ResponseType.plain),
+        );
+
+        String responseBody = response.data.toString().trim();
+        
+        // 检查是否403错误
+        if (response.statusCode == 403) {
+          if (currentRetry < retryCount) {
+            currentRetry++;
+            if (kDebugMode) {
+              print("[QZoneService] 获取照片列表收到403错误，重试第$currentRetry次 (共$retryCount次)");
+            }
+            await Future.delayed(Duration(seconds: 2));
+            continue;
+          } else {
+            throw QZoneApiException("获取照片列表失败，服务器返回403禁止访问");
+          }
+        }
+
+        // 解析JSONP响应
+        int startIndex = responseBody.indexOf('(');
+        int endIndex = responseBody.lastIndexOf(')');
+
+        if (startIndex != -1 && endIndex != -1 && endIndex > startIndex) {
+          responseBody = responseBody.substring(startIndex + 1, endIndex);
+        } else {
+          if (kDebugMode) {
+            print("[QZoneService WARN] 照片列表：无法找到有效的JSONP括号. 原始响应: $responseBody");
+          }
+          
+          if (currentRetry < retryCount && responseBody.isEmpty) {
+            currentRetry++;
+            if (kDebugMode) {
+              print("[QZoneService] 照片列表解析失败，重试第$currentRetry次 (共$retryCount次)");
+            }
+            await Future.delayed(Duration(seconds: 2));
+            continue;
+          }
+        }
+        
+        if (kDebugMode) {
+          print("[QZoneService DEBUG] 照片列表JSONP去除括号后: $responseBody");
+        }
+
+        // 检查空响应
+        if (responseBody.isEmpty) {
+          if (currentRetry < retryCount) {
+            currentRetry++;
+            if (kDebugMode) {
+              print("[QZoneService] 照片列表响应为空，重试第$currentRetry次 (共$retryCount次)");
+            }
+            await Future.delayed(Duration(seconds: 2));
+            continue;
+          } else {
+            throw QZoneApiException("获取照片列表失败，响应内容为空");
+          }
+        }
+
+        final Map<String, dynamic> jsonData = jsonDecode(responseBody);
+
+        if (jsonData['code'] != 0) {
+          throw QZoneApiException("获取照片列表失败. API错误: ${jsonData['message']} (code: ${jsonData['code']})");
+        }
+
+        final Map<String, dynamic> data = jsonData['data'] ?? {};
+        final List<dynamic>? photoListJson = data['photoList'] as List<dynamic>?;
+
+        if (photoListJson != null) {
+          for (var photoJsonUntyped in photoListJson) {
+            if (photoJsonUntyped is Map<String, dynamic>) {
+              final Map<String, dynamic> photoJson = photoJsonUntyped;
+              
+              // 处理照片URL
+              String? photoUrl = photoJson['url'] as String?;
+              String? thumbUrl = photoJson['pre'] as String?;
+
+              allPhotos.add(Photo(
+                id: photoJson['lloc']?.toString() ?? photoJson['sloc']?.toString() ?? '',
+                name: photoJson['name'] as String? ?? '未命名照片',
+                desc: photoJson['desc'] as String?,
+                url: photoUrl,
+                thumbUrl: thumbUrl,
+                uploadTime: (photoJson['uploadTime'] as num?)?.toInt(),
+                width: (photoJson['width'] as num?)?.toInt(),
+                height: (photoJson['height'] as num?)?.toInt(),
+              ));
+            }
+          }
+        }
+
+        // 分页处理
+        final int? totalPhoto = (data['totalPhoto'] as num?)?.toInt() ?? 0;
+        if (pageStart + pageNum < (totalPhoto ?? 0) && photoListJson != null && photoListJson.isNotEmpty) {
+          pageStart += pageNum;
+          hasMore = true;
+        } else {
+          hasMore = false;
+        }
+        
+        // 成功获取数据后重置重试计数
+        currentRetry = 0;
+        
+      } on DioException catch (e, s) {
+        if (kDebugMode) {
+          print("[QZoneService ERROR] 获取照片列表DioException: ${e.message}");
+          print("[QZoneService ERROR] DioException数据: ${e.response?.data}");
+          print("[QZoneService ERROR] DioException类型: ${e.runtimeType}");
+          print("[QZoneService ERROR] DioException堆栈: $s");
+        }
+        
+        if (currentRetry < retryCount) {
+          currentRetry++;
+          if (kDebugMode) {
+            print("[QZoneService] 照片列表网络请求失败，重试第$currentRetry次 (共$retryCount次)");
+          }
+          await Future.delayed(Duration(seconds: 2));
+          continue;
+        }
+        
+        throw QZoneApiException('获取照片列表网络错误: ${e.message}', underlyingError: e);
+      } catch (e, s) {
+        if (kDebugMode) {
+          print("[QZoneService ERROR] 获取照片列表处理错误: $e");
+          print("[QZoneService ERROR] 错误类型: ${e.runtimeType}");
+          print("[QZoneService ERROR] 错误堆栈: $s");
+        }
+        
+        if (currentRetry < retryCount) {
+          currentRetry++;
+          if (kDebugMode) {
+            print("[QZoneService] 照片列表处理失败，重试第$currentRetry次 (共$retryCount次)");
+          }
+          await Future.delayed(Duration(seconds: 2));
+          continue;
+        }
+        
+        throw QZoneApiException('获取照片列表数据处理错误: ${e.toString()}', underlyingError: e);
+      }
+    }
+    
+    if (kDebugMode) {
+      print("[QZoneService] 获取到照片总数: ${allPhotos.length}");
+    }
+    return allPhotos;
+  }
+  
   // TODO: Implement downloadFile (for photos/videos)
 } 
