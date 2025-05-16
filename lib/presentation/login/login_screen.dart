@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:forui/forui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // Import Riverpod
 // import 'package:qr_flutter/qr_flutter.dart'; // Removed as unused
+import 'package:qq_zone_flutter_downloader/core/services/qzone_service.dart';
 import 'package:qq_zone_flutter_downloader/core/models/login_qr_result.dart';
 import 'package:qq_zone_flutter_downloader/core/models/login_poll_result.dart'; // 确保此文件已创建
 import 'package:qq_zone_flutter_downloader/core/models/qzone_api_exception.dart'; // Import QZoneLoginException
 import 'package:qq_zone_flutter_downloader/presentation/home/home_screen.dart'; // Import HomeScreen
 import 'package:qq_zone_flutter_downloader/core/providers/service_providers.dart'; // Import provider
-import 'package:qq_zone_flutter_downloader/presentation/login/webview_login_screen.dart'; // Corrected import
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -175,13 +175,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       onPress: _fetchAndDisplayQrCode,
                       child: const Text('获取登录二维码'),
                     ),
-                  const SizedBox(height: 10),
-                  FButton(
-                    onPress: () {
-                      Navigator.of(context).push(MaterialPageRoute(builder: (context) => const WebViewLoginScreen()));
-                    },
-                    child: const Text('使用账号密码登录 (WebView)'),
-                  ),
                   const SizedBox(height: 10),
                   Text(
                     loginStatus,

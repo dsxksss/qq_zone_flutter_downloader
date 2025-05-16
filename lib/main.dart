@@ -3,8 +3,7 @@ import 'package:forui/forui.dart'; // 导入 forui
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // 如果使用 Riverpod
 
 // 假设您的登录界面会在这里
-// import 'package:qq_zone_flutter_downloader/presentation/login/login_screen.dart';
-import 'package:qq_zone_flutter_downloader/presentation/splash/splash_screen.dart'; // Import SplashScreen
+import 'package:qq_zone_flutter_downloader/presentation/login/login_screen.dart';
 // import 'package:qq_zone_flutter_downloader/app_theme.dart'; // 如果你创建了 app_theme.dart
 
 void main() {
@@ -33,7 +32,7 @@ class Application extends StatelessWidget {
         data: fTheme,
         child: child!,
       ),
-      home: const SplashScreen(), // Changed to SplashScreen
+      home: const LoginScreen(),
       debugShowCheckedModeBanner: false,
     );
   }

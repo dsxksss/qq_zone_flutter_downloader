@@ -12,68 +12,32 @@ import 'package:qq_zone_flutter_downloader/core/utils/qzone_algorithms.dart';
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart'; // Import CookieManager
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p; // For joining paths, aliased to avoid conflict
-import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
-
-// SharedPreferences keys
-const String _prefGTk = 'gTk';
-const String _prefLoggedInUin = 'loggedInUin';
-const String _prefRawUin = 'rawUin';
-const String _prefPSkey = 'pSkey'; // p_skey is crucial for g_tk and session
-const String _prefLoginNickname = 'loginNickname';
 
 class QZoneService {
   late Dio _dio;
-  late PersistCookieJar _cookieJar;
-  bool _isInitialized = false;
-
+  late CookieJar _cookieJar;
   String? _gTk;
   String? _loggedInUin; // QQ号, 不带 'o'
   String? _rawUin; // 原始uin, 可能带 'o'
-  String? _pSkey; // Store p_skey to re-calculate g_tk if needed or for other uses
-  String? _loginNickname; // Store nickname
-
-  // Getter to check initialization status
-  bool get isInitialized => _isInitialized;
 
   QZoneService() {
     if (kDebugMode) {
-      print("[QZoneService CONSTRUCTOR] QZoneService instance created. HashCode: ${hashCode}. Initializing...");
+      print("[QZoneService CONSTRUCTOR] QZoneService instance created. HashCode: ${hashCode}");
     }
-    // _initializeService is now async, so it cannot be directly called from constructor 
-    // if we want to await its completion. We'll call it and let it run, 
-    // or provide a separate public init method.
-    // For now, a common pattern is to have an async init method that the app calls and awaits.
-    // Or, make methods that depend on initialization check _isInitialized and await if not.
-  }
-
-  // Public async initialization method
-  Future<void> initialize() async {
-    if (_isInitialized) return;
-    await _initializeService();
-    await _loadLoginInfo(); // Load info after cookie jar is ready
-    _isInitialized = true;
-    if (kDebugMode) {
-      print("[QZoneService] Initialization complete. isLoggedIn: ${isLoggedIn()}, gTk: $_gTk, Uin: $_loggedInUin");
-    }
+    _initializeService();
   }
 
   Future<void> _initializeService() async {
-    Directory appDocDir = await getApplicationDocumentsDirectory();
-    String appDocPath = appDocDir.path;
-    final cookiePath = p.join(appDocPath, '.cookies'); // Cookies directory
-    
-    if (kDebugMode) {
-      print("[QZoneService _initializeService] Cookie persistent path: $cookiePath");
-    }
-
-    _cookieJar = PersistCookieJar(
-      ignoreExpires: true, // Save cookies till they are explicitly cleared or overwritten
-      storage: FileStorage(cookiePath),
-    );
-    // Load cookies from disk. This is important for PersistCookieJar.
-    // await _cookieJar.load(); // dio_cookie_manager handles this with loadForRequest
+    // Initialize CookieJar, preferably PersistCookieJar for persistence
+    // Directory appDocDir = await getApplicationDocumentsDirectory();
+    // String appDocPath = appDocDir.path;
+    // final cookiePath = p.join(appDocPath, '.cookies');
+    // _cookieJar = PersistCookieJar(
+    //   ignoreExpires: true, // Save cookies till they are explicitly cleared or overwritten
+    //   storage: FileStorage(cookiePath),
+    // );
+    // Using a non-persistent CookieJar for now to avoid async in constructor or complex init
+    _cookieJar = CookieJar();
 
     final options = BaseOptions(
       connectTimeout: const Duration(seconds: 20),
@@ -143,107 +107,8 @@ class QZoneService {
   String? get gTk => _gTk;
   // Getter for loggedInUin (read-only from outside)
   String? get loggedInUin => _loggedInUin;
-  String? get loginNickname => _loginNickname;
 
-  bool isLoggedIn() {
-    // A more robust check might involve validating the gTk or cookies with a quick API call
-    return _gTk != null && _gTk!.isNotEmpty && _loggedInUin != null && _loggedInUin!.isNotEmpty;
-  }
-
-  Future<void> _saveLoginInfo() async {
-    if (!isInitialized) await initialize(); // Ensure initialized
-    final prefs = await SharedPreferences.getInstance();
-    if (_gTk != null) await prefs.setString(_prefGTk, _gTk!);
-    if (_loggedInUin != null) await prefs.setString(_prefLoggedInUin, _loggedInUin!);
-    if (_rawUin != null) await prefs.setString(_prefRawUin, _rawUin!);
-    if (_pSkey != null) await prefs.setString(_prefPSkey, _pSkey!);
-    if (_loginNickname != null) await prefs.setString(_prefLoginNickname, _loginNickname!); 
-    // Cookies are saved by PersistCookieJar automatically to its file.
-    // We might want to force a save if dio_cookie_manager doesn't do it immediately on set.
-    // await _cookieJar.save(); // Typically not needed if using PersistCookieJar correctly with manager
-    if (kDebugMode) {
-      print("[QZoneService _saveLoginInfo] Saved gTk: $_gTk, Uin: $_loggedInUin, Nickname: $_loginNickname, pSkey: $_pSkey");
-    }
-  }
-
-  Future<void> _loadLoginInfo() async {
-    if (!isInitialized && !_isDioSetup()) { 
-        // If called before _dio and _cookieJar are set up by _initializeService,
-        // this might be problematic. initialize() now calls this after _initializeService part.
-         await _initializeService(); // Ensure dio and cookieJar are setup before loading cookies into them
-    }
-    final prefs = await SharedPreferences.getInstance();
-    _gTk = prefs.getString(_prefGTk);
-    _loggedInUin = prefs.getString(_prefLoggedInUin);
-    _rawUin = prefs.getString(_prefRawUin);
-    _pSkey = prefs.getString(_prefPSkey);
-    _loginNickname = prefs.getString(_prefLoginNickname);
-    // Cookies are loaded by PersistCookieJar from its file automatically on creation/first use for a domain.
-    // Or by calling _cookieJar.load() if needed, but dio_cookie_manager usually handles it.
-    if (kDebugMode) {
-      print("[QZoneService _loadLoginInfo] Loaded gTk: $_gTk, Uin: $_loggedInUin, Nickname: $_loginNickname, pSkey: $_pSkey");
-      if (_gTk == null && _pSkey != null) { // If gTk is missing but pSkey is there, recalculate
-          _gTk = QZoneAlgorithms.calculateGtk(_pSkey!);
-          print("[QZoneService _loadLoginInfo] Recalculated gTk: $_gTk from loaded pSkey.");
-      }
-    }
-  }
-  
-  // Helper to check if essential Dio components are set up
-  bool _isDioSetup() {
-      try {
-          return _dio != null && _cookieJar != null;
-      } catch (e) { // Catches LateInitializationError if not set
-          return false;
-      }
-  }
-
-  Future<void> logout() async {
-    if (!isInitialized && !_isDioSetup()) await initialize();
-    _gTk = null;
-    _loggedInUin = null;
-    _rawUin = null;
-    _pSkey = null;
-    _loginNickname = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_prefGTk);
-    await prefs.remove(_prefLoggedInUin);
-    await prefs.remove(_prefRawUin);
-    await prefs.remove(_prefPSkey);
-    await prefs.remove(_prefLoginNickname);
-    await _cookieJar.deleteAll(); // Clear all persisted cookies
-    if (kDebugMode) {
-      print("[QZoneService logout] Cleared login info and cookies.");
-    }
-  }
-
-  // Method for WebView login to set crucial details and save them
-  // This bypasses the usual _handleCredentialRedirect as cookies are extracted from WebView
-  void dangerouslySetPskeyAndUinForWebViewLogin(String pSkey, String uin, String? nickname) {
-    if (kDebugMode) {
-      print("[QZoneService DEBUG] Setting info from WebView login: pSkey=$pSkey, uin=$uin, nickname=$nickname");
-    }
-    _pSkey = pSkey;
-    _rawUin = uin; // uin from cookie can be like oXXXXX
-    _loggedInUin = uin.startsWith('o') ? uin.substring(1) : uin;
-    _gTk = QZoneAlgorithms.calculateGtk(pSkey);
-    _loginNickname = nickname; // Nickname might be null if not easily available from WebView flow
-     if (kDebugMode) {
-      print("[QZoneService DEBUG] After WebView set: gTk=$_gTk, loggedInUin=$_loggedInUin, nickname=$_loginNickname");
-    }
-  }
-
-  Future<void> saveLoginInfoAfterWebView(String pSkey, String uin, String? nickname) async {
-    // This method might seem redundant if dangerouslySet... already sets the fields.
-    // However, it ensures that _saveLoginInfo is called with the correct current state.
-    // Alternatively, dangerouslySet... could directly call _saveLoginInfo, 
-    // but separating allows for a clear set then save pattern.
-    // We already set the internal fields in dangerouslySet..., so just call _saveLoginInfo.
-    await _saveLoginInfo();
-  }
-
-  Future<void> _handleCredentialRedirect(String redirectUrl, String? nicknameFromPoll) async {
-    if (!isInitialized && !_isDioSetup()) await initialize();
+  Future<void> _handleCredentialRedirect(String redirectUrl) async {
     if (kDebugMode) {
       print("[QZoneService DEBUG] === Starting _handleCredentialRedirect ===");
       print("[QZoneService DEBUG] redirectUrl: $redirectUrl");
@@ -324,12 +189,6 @@ class QZoneService {
         throw QZoneApiException("Failed to retrieve UIN from cookies after login redirect.");
       }
 
-      _loginNickname = nicknameFromPoll; // Save nickname from poll result
-
-      if (pSkey != null && pSkey.isNotEmpty) { // Ensure pSkey is saved for gTk recalc
-          _pSkey = pSkey;
-      }
-
     } on DioException catch (e) {
       if (kDebugMode) {
         print("[QZoneService ERROR] DioException in _handleCredentialRedirect: ${e.message}, Response: ${e.response?.data}");
@@ -341,7 +200,6 @@ class QZoneService {
       }
       throw QZoneApiException("Unexpected error during credential handling: ${e.toString()}", underlyingError: e);
     }
-    await _saveLoginInfo(); // Save all info after successful credential handling
     if (kDebugMode) {
       print("[QZoneService DEBUG] === Finished _handleCredentialRedirect === gTk: $_gTk, loggedInUin: $_loggedInUin");
     }
@@ -445,19 +303,12 @@ class QZoneService {
 
   /// Polls the QQ login server to check QR code scan status.
   /// Returns a stream of LoginPollResult. Completes when login is successful or QR is invalid.
-  Stream<LoginPollResult?> pollLoginStatus({
+  Stream<LoginPollResult> pollLoginStatus({
     required String loginSig,
     required String qrsig,
     required String ptqrtoken,
   }) {
-    // Ensure service is initialized before polling starts, or make pollLoginStatus call initialize()
-    // if (!isInitialized && !_isDioSetup()) { 
-    //   print("[QZoneService WARN] pollLoginStatus called before service fully initialized. Consider awaiting initialize() first.");
-      // One option: await initialize(); // but this makes pollLoginStatus async, changing its signature if not already.
-      // Another option: the caller of pollLoginStatus (LoginScreen) ensures initialize() is called.
-    //}
-
-    late StreamController<LoginPollResult?> controller;
+    late StreamController<LoginPollResult> controller;
     Timer? timer;
     bool isPolling = true;
 
@@ -504,18 +355,20 @@ class QZoneService {
                 final nickname = args.length > 5 ? args[5] : null;
 
                 if (redirectUrl != null) {
-                  _handleCredentialRedirect(redirectUrl, nickname).then((_) {
+                  // IMPORTANT: Call _handleCredentialRedirect BEFORE adding to stream,
+                  // so that g_tk and uin are available when HomeScreen loads.
+                  _handleCredentialRedirect(redirectUrl).then((_) {
                     if (kDebugMode) {
                         print("[QZoneService DEBUG] _handleCredentialRedirect successful. Setting LoginPollStatus.loginSuccess.");
                     }
-                    result = LoginPollResult(
-                      status: LoginPollStatus.loginSuccess,
+                result = LoginPollResult(
+                  status: LoginPollStatus.loginSuccess,
                       redirectUrl: redirectUrl,
-                      nickname: _loginNickname, // Use the potentially updated nickname
-                      message: message,
-                    );
-                    controller.add(result);
-                    if (!controller.isClosed) controller.close(); // Ensure close is only called if not already closed
+                      nickname: nickname,
+                  message: message,
+                );
+                controller.add(result);
+                    controller.close();
                   }).catchError((e) {
                     if (kDebugMode) {
                       print("[QZoneService ERROR] _handleCredentialRedirect failed: $e. Setting LoginPollStatus.error.");
@@ -525,7 +378,7 @@ class QZoneService {
                       message: "登录凭证处理失败: ${e.toString()}"
                     );
                     controller.add(result);
-                    if (!controller.isClosed) controller.close();
+                    controller.close();
                   });
                 } else {
                   result = LoginPollResult(
@@ -534,8 +387,9 @@ class QZoneService {
                     nickname: nickname,
                   );
                   controller.add(result);
-                  if (!controller.isClosed) controller.close();
+                  controller.close();
                 }
+                // Do not add to controller here directly, it's handled in .then() or .catchError()
                 break;
               case '65': 
                 isPolling = false;
@@ -544,20 +398,18 @@ class QZoneService {
                     status: LoginPollStatus.qrInvalidOrExpired,
                     message: message);
                 controller.add(result);
-                if (!controller.isClosed) controller.close(); 
+                await controller.close(); 
                 break;
               case '66': 
                 result = LoginPollResult(
                     status: LoginPollStatus.qrNotScanned, message: message);
                 controller.add(result);
-                if (!controller.isClosed) controller.close();
                 break;
               case '67': 
                 result = LoginPollResult(
                     status: LoginPollStatus.qrScannedWaitingConfirmation,
                     message: message);
                 controller.add(result);
-                if (!controller.isClosed) controller.close();
                 break;
               default:
                 result = LoginPollResult(
@@ -565,7 +417,6 @@ class QZoneService {
                     message:
                         "Unknown status code: $statusCode. Full args: $args");
                 controller.add(result);
-                if (!controller.isClosed) controller.close();
             }
             return; 
           }
@@ -583,11 +434,11 @@ class QZoneService {
             message: "Unexpected error during polling: ${e.toString()}"));
         isPolling = false; 
         timer?.cancel();
-        if (!controller.isClosed) controller.close();
+        await controller.close();
       }
     }
 
-    controller = StreamController<LoginPollResult?>(
+    controller = StreamController<LoginPollResult>(
       onListen: () {
         checkStatus(); 
         timer =
@@ -603,11 +454,11 @@ class QZoneService {
 
   // TODO: Implement finalizeLogin (credential check)
   Future<List<Album>> getAlbumList({String? targetUinOverride}) async {
-    if (!isInitialized) await initialize(); // Ensure initialized before proceeding
-    if (!isLoggedIn()) {
-      throw QZoneApiException("Not logged in. Cannot fetch albums. Please log in first.");
-    }
     // Use the stored _loggedInUin and _gTk
+    if (_loggedInUin == null || _gTk == null) {
+      throw QZoneApiException("Not logged in or g_tk/uin not available. Cannot fetch albums.");
+    }
+
     final String hostUin = targetUinOverride ?? _loggedInUin!; // If targetUinOverride is null, use loggedInUin
     final String uin = _loggedInUin!;
     final String gtk = _gTk!;

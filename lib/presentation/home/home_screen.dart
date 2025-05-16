@@ -68,17 +68,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> { // 创建 State 类
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 FButton(
-                  child: const Text('登出'),
-                  onPress: () async {
-                    final qzoneService = ref.read(qZoneServiceProvider);
-                    await qzoneService.logout();
-                    if (mounted) {
+                    child: const Text('登出'),
+                    onPress: () {
                       Navigator.of(context).pushAndRemoveUntil(
                         MaterialPageRoute(builder: (context) => const LoginScreen()),
                         (Route<dynamic> route) => false,
                       );
                     }
-                  }
                 ),
               ],
             ),
