@@ -10,8 +10,8 @@ import 'package:flutter/foundation.dart';
 class DownloadManagerState {
   final Map<String, DownloadRecord> activeDownloads; // 当前活跃的下载 (id -> record)
 
-  DownloadManagerState({Map<String, DownloadRecord>? activeDownloads}) 
-    : activeDownloads = activeDownloads ?? {};
+  DownloadManagerState({Map<String, DownloadRecord>? activeDownloads})
+      : activeDownloads = activeDownloads ?? {};
 
   DownloadManagerState copyWith({
     Map<String, DownloadRecord>? activeDownloads,
@@ -27,14 +27,15 @@ class DownloadManager extends StateNotifier<DownloadManagerState> {
   final DownloadRecordService _recordService;
   final QZoneService _qzoneService;
   final NotificationService _notificationService;
-  
-  DownloadManager(this._recordService, this._qzoneService, this._notificationService) 
-    : super(DownloadManagerState());
+
+  DownloadManager(
+      this._recordService, this._qzoneService, this._notificationService)
+      : super(DownloadManagerState());
 
   // 开始下载相册
   Future<void> downloadAlbum({
-    required Album album, 
-    required String savePath, 
+    required Album album,
+    required String savePath,
     String? targetUin,
     bool skipExisting = true,
   }) async {
@@ -68,35 +69,37 @@ class DownloadManager extends StateNotifier<DownloadManagerState> {
         savePath: savePath,
         targetUin: targetUin,
         skipExisting: skipExisting,
+        downloadId: record.id, // 使用记录ID作为下载ID
         onProgress: (current, total, message) async {
           if (kDebugMode) {
             print("[DownloadManager] 进度更新: $current/$total - $message");
           }
-          
+
           // 计算进度百分比（0-100%）
           double progressPercent = total > 0 ? current / total : 0;
-          
+
           // 更新记录和状态
           final updatedRecord = record.copyWith(
             currentProgress: current,
             currentMessage: message,
           );
-          
-          // 更新记录服务
-          await _recordService.updateDownloadProgress(
-            record.id, 
-            current, 
-            total, 
-            message
-          );
-          
-          // 更新状态
-          state = state.copyWith(
-            activeDownloads: {...state.activeDownloads, record.id: updatedRecord},
-          );
-          
-          // 每5个项目更新一次下载进度通知，避免频繁更新
-          if (current % 5 == 0 && current > 0 && total > 0) {
+
+          // 更新记录服务 - 只在文件完成时更新数据库，减少IO操作
+          if (message.contains('下载完成') || current == 0 || current % 10 == 0) {
+            await _recordService.updateDownloadProgress(
+                record.id, current, total, message);
+          }
+
+          // 更新状态 - 只在文件完成时或每1个文件更新一次状态，减少UI刷新
+          if (message.contains('下载完成') || current == 0 || current % 1 == 0) {
+            state = state.copyWith(
+              activeDownloads: {
+                ...state.activeDownloads,
+                record.id: updatedRecord
+              },
+            );
+
+            // 更新通知
             _notificationService.showDownloadProgress(
               id: record.id.hashCode,
               title: "正在下载 ${album.name}",
@@ -109,7 +112,8 @@ class DownloadManager extends StateNotifier<DownloadManagerState> {
         onItemComplete: (result) {
           // 可以处理单个项目完成事件
           if (kDebugMode) {
-            print("[DownloadManager] 文件下载完成: ${result['filename']}, 状态: ${result['status']}");
+            print(
+                "[DownloadManager] 文件下载完成: ${result['filename']}, 状态: ${result['status']}");
           }
         },
       );
@@ -123,7 +127,8 @@ class DownloadManager extends StateNotifier<DownloadManagerState> {
       );
 
       // 更新状态，移除活跃下载
-      final newActiveDownloads = Map<String, DownloadRecord>.from(state.activeDownloads);
+      final newActiveDownloads =
+          Map<String, DownloadRecord>.from(state.activeDownloads);
       newActiveDownloads.remove(record.id);
       state = state.copyWith(activeDownloads: newActiveDownloads);
 
@@ -150,7 +155,8 @@ class DownloadManager extends StateNotifier<DownloadManagerState> {
       );
 
       // 更新状态，移除活跃下载
-      final newActiveDownloads = Map<String, DownloadRecord>.from(state.activeDownloads);
+      final newActiveDownloads =
+          Map<String, DownloadRecord>.from(state.activeDownloads);
       newActiveDownloads.remove(record.id);
       state = state.copyWith(activeDownloads: newActiveDownloads);
     }
@@ -162,6 +168,13 @@ class DownloadManager extends StateNotifier<DownloadManagerState> {
       return;
     }
 
+    if (kDebugMode) {
+      print("[DownloadManager] 取消下载: $recordId");
+    }
+
+    // 调用QZoneService取消下载任务
+    _qzoneService.cancelDownload(recordId);
+
     // 标记为已完成（取消）
     await _recordService.completeDownload(
       recordId,
@@ -170,9 +183,20 @@ class DownloadManager extends StateNotifier<DownloadManagerState> {
       skippedCount: 0,
     );
 
+    // 获取记录信息用于通知（在移除前获取）
+    final DownloadRecord? record = state.activeDownloads[recordId];
+
     // 从活跃下载中移除
-    final newActiveDownloads = Map<String, DownloadRecord>.from(state.activeDownloads);
+    final newActiveDownloads =
+        Map<String, DownloadRecord>.from(state.activeDownloads);
     newActiveDownloads.remove(recordId);
     state = state.copyWith(activeDownloads: newActiveDownloads);
+
+    // 更新状态后发送通知
+    if (record != null) {
+      _notificationService.showDownloadCancelled(
+        albumName: record.albumName,
+      );
+    }
   }
-} 
+}

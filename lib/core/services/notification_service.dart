@@ -4,40 +4,41 @@ import 'dart:io';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
-  
+
   factory NotificationService() {
     return _instance;
   }
-  
+
   NotificationService._internal();
-  
-  final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin = 
+
+  final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
-      
+
   bool _isInitialized = false;
-  
+
   Future<void> initialize() async {
     if (_isInitialized) return;
-    
-    const AndroidInitializationSettings androidInitializationSettings = 
+
+    const AndroidInitializationSettings androidInitializationSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-        
-    final DarwinInitializationSettings iosInitializationSettings = 
+
+    final DarwinInitializationSettings iosInitializationSettings =
         DarwinInitializationSettings(
-          requestAlertPermission: true,
-          requestBadgePermission: true,
-          requestSoundPermission: true,
-        );
-        
-    final InitializationSettings initializationSettings = InitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+
+    final InitializationSettings initializationSettings =
+        InitializationSettings(
       android: androidInitializationSettings,
       iOS: iosInitializationSettings,
     );
-    
+
     await _flutterLocalNotificationsPlugin.initialize(
       initializationSettings,
     );
-    
+
     // 请求通知权限
     if (Platform.isAndroid) {
       // Android 13及以上需要请求通知权限
@@ -52,10 +53,10 @@ class NotificationService {
         }
       }
     }
-    
+
     _isInitialized = true;
   }
-  
+
   // 显示下载完成通知
   Future<void> showDownloadComplete({
     required String title,
@@ -65,28 +66,28 @@ class NotificationService {
     if (!_isInitialized) {
       await initialize();
     }
-    
-    const AndroidNotificationDetails androidNotificationDetails = 
+
+    const AndroidNotificationDetails androidNotificationDetails =
         AndroidNotificationDetails(
-          'download_channel',
-          '下载通知',
-          channelDescription: '显示QQ空间照片和视频下载的通知',
-          importance: Importance.high,
-          priority: Priority.high,
-        );
-        
-    const DarwinNotificationDetails iosNotificationDetails = 
+      'download_channel',
+      '下载通知',
+      channelDescription: '显示QQ空间照片和视频下载的通知',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+
+    const DarwinNotificationDetails iosNotificationDetails =
         DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: true,
-        );
-        
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+
     const NotificationDetails notificationDetails = NotificationDetails(
       android: androidNotificationDetails,
       iOS: iosNotificationDetails,
     );
-    
+
     await _flutterLocalNotificationsPlugin.show(
       DateTime.now().millisecondsSinceEpoch % 100000,
       title,
@@ -95,7 +96,7 @@ class NotificationService {
       payload: payload,
     );
   }
-  
+
   // 显示批量下载完成通知
   Future<void> showBatchDownloadComplete({
     required String albumName,
@@ -111,7 +112,7 @@ class NotificationService {
       payload: savePath,
     );
   }
-  
+
   // 显示下载进度通知
   Future<void> showDownloadProgress({
     required int id,
@@ -123,34 +124,34 @@ class NotificationService {
     if (!_isInitialized) {
       await initialize();
     }
-    
-    final AndroidNotificationDetails androidNotificationDetails = 
+
+    final AndroidNotificationDetails androidNotificationDetails =
         AndroidNotificationDetails(
-          'download_progress_channel',
-          '下载进度通知',
-          channelDescription: '显示QQ空间照片和视频下载进度的通知',
-          importance: Importance.low,
-          priority: Priority.low,
-          showProgress: true,
-          maxProgress: 100,
-          progress: (progress * 100).toInt(),
-          onlyAlertOnce: true,
-          ongoing: true,
-          autoCancel: false,
-        );
-        
-    const DarwinNotificationDetails iosNotificationDetails = 
+      'download_progress_channel',
+      '下载进度通知',
+      channelDescription: '显示QQ空间照片和视频下载进度的通知',
+      importance: Importance.low,
+      priority: Priority.low,
+      showProgress: true,
+      maxProgress: 100,
+      progress: (progress * 100).toInt(),
+      onlyAlertOnce: true,
+      ongoing: true,
+      autoCancel: false,
+    );
+
+    const DarwinNotificationDetails iosNotificationDetails =
         DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: false,
-        );
-        
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: false,
+    );
+
     final NotificationDetails notificationDetails = NotificationDetails(
       android: androidNotificationDetails,
       iOS: iosNotificationDetails,
     );
-    
+
     await _flutterLocalNotificationsPlugin.show(
       id,
       title,
@@ -158,4 +159,14 @@ class NotificationService {
       notificationDetails,
     );
   }
-} 
+
+  // 显示下载取消通知
+  Future<void> showDownloadCancelled({
+    required String albumName,
+  }) async {
+    await showDownloadComplete(
+      title: '已取消下载',
+      body: '相册"$albumName"的下载已被取消',
+    );
+  }
+}

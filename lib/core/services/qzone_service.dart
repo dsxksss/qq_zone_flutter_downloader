@@ -28,6 +28,9 @@ class QZoneService {
   String? _rawUin; // 原始uin, 可能带 'o'
   bool _isInitialized = false;
 
+  // 用于跟踪活跃下载的CancelToken
+  final Map<String, CancelToken> _downloadCancelTokens = {};
+
   QZoneService() {
     if (kDebugMode) {
       print(
@@ -1389,10 +1392,22 @@ class QZoneService {
       required String savePath,
       required String filename,
       bool isVideo = false,
+      String? downloadId,
+      CancelToken? cancelToken,
       Function(int received, int total)? onProgress}) async {
     if (_loggedInUin == null || _gTk == null) {
       throw QZoneApiException(
           "Not logged in or g_tk/uin not available. Cannot download file.");
+    }
+
+    // 如果提供了downloadId但没有提供cancelToken，使用downloadId创建cancelToken
+    if (downloadId != null && cancelToken == null) {
+      cancelToken = _downloadCancelTokens[downloadId];
+
+      // 如果没有找到现有的cancelToken，创建一个新的
+      if (cancelToken == null) {
+        cancelToken = registerDownload(downloadId);
+      }
     }
 
     try {
@@ -1539,6 +1554,7 @@ class QZoneService {
             validateStatus: (status) {
               return status != null && status < 500;
             }),
+        cancelToken: cancelToken,
         onReceiveProgress: (received, total) {
           if (kDebugMode && total > 0 && received % (total ~/ 10) == 0) {
             if (kDebugMode) {
@@ -1964,11 +1980,19 @@ class QZoneService {
     required String savePath,
     String? targetUin,
     bool skipExisting = false,
+    String? downloadId,
+    CancelToken? cancelToken,
     Function(int current, int total, String message)? onProgress,
     Function(Map<String, dynamic> result)? onItemComplete,
   }) async {
     if (!isLoggedIn) {
       throw QZoneApiException('未登录，请先登录');
+    }
+
+    // 如果提供了downloadId但没有提供cancelToken，使用downloadId创建cancelToken
+    if (downloadId != null && cancelToken == null) {
+      cancelToken =
+          _downloadCancelTokens[downloadId] ?? registerDownload(downloadId);
     }
 
     final String albumPath = '$savePath/${album.name}';
@@ -1987,6 +2011,14 @@ class QZoneService {
     try {
       // 分页获取所有照片
       while (hasMore) {
+        // 检查下载是否已被取消
+        if (cancelToken != null && cancelToken.isCancelled) {
+          if (kDebugMode) {
+            print("[QZoneService] 下载已被用户取消，停止获取照片列表");
+          }
+          throw QZoneApiException('下载已被用户取消');
+        }
+
         if (onProgress != null) {
           onProgress(allPhotos.length, album.photoCount,
               "正在获取照片列表 (${allPhotos.length}/${album.photoCount})...");
@@ -2072,6 +2104,14 @@ class QZoneService {
     int skipped = 0;
 
     for (int i = 0; i < allPhotos.length; i++) {
+      // 检查下载是否已被取消
+      if (cancelToken != null && cancelToken.isCancelled) {
+        if (kDebugMode) {
+          print("[QZoneService] 下载已被用户取消，停止处理剩余照片");
+        }
+        throw QZoneApiException('下载已被用户取消');
+      }
+
       final photo = allPhotos[i];
       String fileExt;
       String message;
@@ -2256,22 +2296,31 @@ class QZoneService {
 
         // 下载文件
         try {
+          // 只在开始下载时更新一次进度
+          if (onProgress != null) {
+            onProgress(i, total, '$message - 下载中...');
+          }
+
+          // 检查下载是否已被取消
+          if (cancelToken != null && cancelToken.isCancelled) {
+            throw QZoneApiException('下载已被用户取消');
+          }
+
           final result = await downloadFile(
               url: url,
               savePath: albumPath,
               filename: fileName,
               isVideo: photo.isVideo,
+              downloadId: downloadId,
+              cancelToken: cancelToken,
               onProgress: (received, total) {
-                if (onProgress != null && total > 0) {
-                  final percentage = received / total;
-                  final progressMessage =
-                      '$message - 下载中 ${(percentage * 100).toStringAsFixed(1)}%';
-                  onProgress(i + 1, allPhotos.length, progressMessage);
-                }
+                // 不在这里更新UI进度，避免频繁刷新
+                // 只在文件下载完成后更新进度
               });
 
           success++;
 
+          // 文件下载完成后更新进度
           if (onProgress != null) {
             onProgress(i + 1, total, '$message - 下载完成');
           }
@@ -2316,22 +2365,31 @@ class QZoneService {
                   onProgress(i + 1, total, '$message - 尝试备用URL下载...');
                 }
 
+                // 只在开始下载时更新一次进度
+                if (onProgress != null) {
+                  onProgress(i, total, '$message - 备用URL下载中...');
+                }
+
+                // 检查下载是否已被取消
+                if (cancelToken != null && cancelToken.isCancelled) {
+                  throw QZoneApiException('下载已被用户取消');
+                }
+
                 final result = await downloadFile(
                     url: alternativeVideoUrl,
                     savePath: albumPath,
                     filename: fileName,
                     isVideo: true,
+                    downloadId: downloadId,
+                    cancelToken: cancelToken,
                     onProgress: (received, total) {
-                      if (onProgress != null && total > 0) {
-                        final percentage = received / total;
-                        final progressMessage =
-                            '$message - 备用URL下载中 ${(percentage * 100).toStringAsFixed(1)}%';
-                        onProgress(i + 1, allPhotos.length, progressMessage);
-                      }
+                      // 不在这里更新UI进度，避免频繁刷新
+                      // 只在文件下载完成后更新进度
                     });
 
                 success++;
 
+                // 文件下载完成后更新进度
                 if (onProgress != null) {
                   onProgress(i + 1, total, '$message - 备用URL下载完成');
                 }
@@ -2579,6 +2637,40 @@ class QZoneService {
       }
       return '';
     }
+  }
+
+  // 注册下载任务，创建并返回CancelToken
+  CancelToken registerDownload(String downloadId) {
+    // 如果已存在，先取消旧的
+    cancelDownload(downloadId);
+
+    // 创建新的CancelToken
+    final cancelToken = CancelToken();
+    _downloadCancelTokens[downloadId] = cancelToken;
+
+    if (kDebugMode) {
+      print("[QZoneService] 注册下载任务: $downloadId");
+    }
+
+    return cancelToken;
+  }
+
+  // 取消下载任务
+  void cancelDownload(String downloadId) {
+    final cancelToken = _downloadCancelTokens[downloadId];
+    if (cancelToken != null && !cancelToken.isCancelled) {
+      cancelToken.cancel('用户取消下载');
+      if (kDebugMode) {
+        print("[QZoneService] 取消下载任务: $downloadId");
+      }
+    }
+    _downloadCancelTokens.remove(downloadId);
+  }
+
+  // 检查下载是否已被取消
+  bool isDownloadCancelled(String downloadId) {
+    final cancelToken = _downloadCancelTokens[downloadId];
+    return cancelToken == null || cancelToken.isCancelled;
   }
 
   // 使用更完整的Header信息访问图片
