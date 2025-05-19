@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:forui/forui.dart'; // 导入 forui
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // 如果使用 Riverpod
+// 导入 FontAwesome
 
 // 假设您的登录界面会在这里
-import 'package:qq_zone_flutter_downloader/presentation/login/login_screen.dart';
 import 'package:qq_zone_flutter_downloader/presentation/splash/splash_screen.dart'; // 导入启动屏幕
-// import 'package:qq_zone_flutter_downloader/app_theme.dart'; // 如果你创建了 app_theme.dart
 
 void main() {
   runApp(
@@ -27,8 +26,6 @@ class Application extends StatelessWidget {
     final FThemeData fTheme = FThemes.zinc.light; // 请选择一个实际存在的主题
 
     return MaterialApp(
-      // 根据 forui v0.11.0 文档 (https://forui.dev/docs/getting-started#usage)
-      // FTheme widget 应该放在 builder 中
       builder: (context, child) => FTheme(
         data: fTheme,
         child: child!,

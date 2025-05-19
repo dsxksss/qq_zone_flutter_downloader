@@ -1,10 +1,8 @@
 import 'dart:async'; // For StreamSubscription
-import 'dart:typed_data'; // For Uint8List
 import 'package:flutter/material.dart';
 import 'package:forui/forui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // Import Riverpod
 // import 'package:qr_flutter/qr_flutter.dart'; // Removed as unused
-import 'package:qq_zone_flutter_downloader/core/services/qzone_service.dart';
 import 'package:qq_zone_flutter_downloader/core/models/login_qr_result.dart';
 import 'package:qq_zone_flutter_downloader/core/models/login_poll_result.dart'; // 确保此文件已创建
 import 'package:qq_zone_flutter_downloader/core/models/qzone_api_exception.dart'; // Import QZoneLoginException
@@ -28,7 +26,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   String? errorMessage;
 
   StreamSubscription<LoginPollResult?>? _pollSubscription;
-  
+
   @override
   void initState() {
     super.initState();
@@ -37,7 +35,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _checkIfAlreadyLoggedIn();
     });
   }
-  
+
   Future<void> _checkIfAlreadyLoggedIn() async {
     final qzoneService = ref.read(qZoneServiceProvider);
     if (qzoneService.isLoggedIn) {
@@ -72,7 +70,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       loginStatus = "正在获取二维码...";
     });
 
-    final qzoneService = ref.read(qZoneServiceProvider); // Get service from Riverpod
+    final qzoneService =
+        ref.read(qZoneServiceProvider); // Get service from Riverpod
 
     try {
       final result = await qzoneService.getLoginQrImage();
@@ -110,7 +109,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   void _startLoginPolling(String loginSig, String qrsig) {
-    final qzoneService = ref.read(qZoneServiceProvider); // Get service from Riverpod
+    final qzoneService =
+        ref.read(qZoneServiceProvider); // Get service from Riverpod
     final ptqrtoken = qzoneService.calculatePtqrtoken(qrsig);
     // print("Calculated ptqrtoken: $ptqrtoken");
 
@@ -132,7 +132,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             _pollSubscription?.cancel();
             if (mounted) {
               Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (context) => HomeScreen(nickname: pollResult.nickname)),
+                MaterialPageRoute(
+                    builder: (context) =>
+                        HomeScreen(nickname: pollResult.nickname)),
               );
             }
             break;

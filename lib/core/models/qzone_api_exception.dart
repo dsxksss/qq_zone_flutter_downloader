@@ -17,6 +17,5 @@ class QZoneApiException implements Exception {
 // 你可能已经有一个 QZoneLoginException，如果它的目的不同，则保留两者
 // 如果 QZoneApiException 可以覆盖其功能，则可以考虑合并或替换
 class QZoneLoginException extends QZoneApiException {
-  QZoneLoginException(String message, {dynamic underlyingError})
-      : super(message, underlyingError: underlyingError);
+  QZoneLoginException(super.message, {super.underlyingError});
 } 
