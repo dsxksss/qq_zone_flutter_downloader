@@ -18,6 +18,7 @@ import 'package:dio_cookie_manager/dio_cookie_manager.dart'; // Import CookieMan
 import 'package:path_provider/path_provider.dart'; // 导入path_provider
 import 'package:path/path.dart' as p; // 导入path包
 import 'package:shared_preferences/shared_preferences.dart'; // 导入shared_preferences
+import 'package:crypto/crypto.dart'; // 导入crypto包用于MD5计算
 
 class QZoneService {
   late Dio _dio;
@@ -1122,21 +1123,69 @@ class QZoneService {
                 photoUrl = photoJson['origin_url'] as String?;
               }
 
-              // 判断是否为视频
+              // 判断是否为视频 - 增强检测逻辑
               final bool isVideo = photoJson['is_video'] == 1 ||
                   (photoJson['videoInfo'] != null) ||
-                  (photoJson['video_info'] != null);
+                  (photoJson['video_info'] != null) ||
+                  (photoJson['video_url'] != null) ||
+                  (photoJson['url_type'] == 2) ||
+                  (photoJson['type'] == 2) ||
+                  (photoJson['is_video'] == true) ||
+                  (photoJson['name']
+                      .toString()
+                      .toLowerCase()
+                      .endsWith('.mp4')) ||
+                  (photoJson['name'].toString().toLowerCase().endsWith('.mov'));
 
               String? videoUrl;
               if (isVideo) {
+                // 按优先级尝试获取视频URL
                 if (photoJson['videoInfo'] is Map<String, dynamic>) {
                   videoUrl = photoJson['videoInfo']['url'] as String?;
-                } else if (photoJson['video_info'] is Map<String, dynamic>) {
+                  if (videoUrl == null || videoUrl.isEmpty) {
+                    videoUrl = photoJson['videoInfo']['raw_url'] as String?;
+                  }
+                  if (videoUrl == null || videoUrl.isEmpty) {
+                    videoUrl =
+                        photoJson['videoInfo']['download_url'] as String?;
+                  }
+                }
+
+                if ((videoUrl == null || videoUrl.isEmpty) &&
+                    photoJson['video_info'] is Map<String, dynamic>) {
                   videoUrl = photoJson['video_info']['url'] as String?;
-                } else if (photoJson['video_url'] != null) {
+                  if (videoUrl == null || videoUrl.isEmpty) {
+                    videoUrl = photoJson['video_info']['raw_url'] as String?;
+                  }
+                  if (videoUrl == null || videoUrl.isEmpty) {
+                    videoUrl =
+                        photoJson['video_info']['download_url'] as String?;
+                  }
+                }
+
+                if (videoUrl == null || videoUrl.isEmpty) {
                   videoUrl = photoJson['video_url'] as String?;
-                } else if (photoJson['raw_url'] != null) {
+                }
+
+                if (videoUrl == null || videoUrl.isEmpty) {
+                  videoUrl = photoJson['download_url'] as String?;
+                }
+
+                if (videoUrl == null || videoUrl.isEmpty) {
                   videoUrl = photoJson['raw_url'] as String?;
+                }
+
+                // 如果所有尝试都失败，但确定是视频，使用普通URL
+                if ((videoUrl == null || videoUrl.isEmpty) &&
+                    photoUrl != null) {
+                  videoUrl = photoUrl;
+                  if (kDebugMode) {
+                    print("[QZoneService] 未找到专用视频URL，使用普通URL: $photoUrl");
+                  }
+                }
+
+                if (kDebugMode && videoUrl != null) {
+                  print("[QZoneService] 找到视频URL: $videoUrl");
                 }
               }
 
@@ -1146,8 +1195,24 @@ class QZoneService {
 
               // 确保ID是唯一的，如果重复使用就在ID后添加时间戳
               if (id.isNotEmpty && allPhotos.any((p) => p.id == id)) {
-                id += "_" + DateTime.now().millisecondsSinceEpoch.toString();
+                id += "_${DateTime.now().millisecondsSinceEpoch}";
               }
+
+              // 获取拍摄时间
+              String shootTime = '';
+              if (photoJson['shootTime'] != null) {
+                shootTime = photoJson['shootTime'].toString();
+              } else if (photoJson['uploadTime'] != null) {
+                // 如果没有拍摄时间，使用上传时间
+                shootTime = photoJson['uploadTime'].toString();
+              } else {
+                // 如果都没有，使用当前时间
+                shootTime = DateTime.now().millisecondsSinceEpoch.toString();
+              }
+
+              // 获取位置信息
+              String lloc = photoJson['lloc']?.toString() ?? '';
+              String sloc = photoJson['sloc']?.toString() ?? '';
 
               pagePhotos.add(Photo(
                 id: id,
@@ -1160,6 +1225,9 @@ class QZoneService {
                 height: (photoJson['height'] as num?)?.toInt(),
                 isVideo: isVideo,
                 videoUrl: videoUrl,
+                shootTime: shootTime,
+                lloc: lloc,
+                sloc: sloc,
               ));
             }
           }
@@ -1344,11 +1412,23 @@ class QZoneService {
         'Cookie': await _getFullCookieString('https://user.qzone.qq.com/'),
       };
 
-      // 对于视频，添加额外的请求头
+      // 对于视频，添加额外的请求头，参考Go版本的实现
       if (isVideo) {
         headers['Accept'] = '*/*';
         headers['Accept-Encoding'] = 'identity;q=1, *;q=0';
+        headers['Connection'] = 'keep-alive';
+
+        // 添加Host头
+        try {
+          final uri = Uri.parse(url);
+          headers['Host'] = uri.host;
+        } catch (e) {
+          // 忽略解析错误
+        }
+
         headers['Range'] = 'bytes=0-';
+        headers['Referer'] =
+            'https://user.qzone.qq.com/$_loggedInUin/infocenter';
         headers['Sec-Fetch-Dest'] = 'video';
         headers['Sec-Fetch-Mode'] = 'no-cors';
         headers['Sec-Fetch-Site'] = 'cross-site';
@@ -1360,15 +1440,91 @@ class QZoneService {
         print("[QZoneService] 是否视频: $isVideo");
       }
 
-      // 视频URL清理 - 确保正确的视频URL
-      if (isVideo && url.contains('?')) {
-        // 有些视频URL带有多余的查询参数，尝试清理
-        final uri = Uri.parse(url);
-        if (uri.path.endsWith('.mp4') || uri.path.endsWith('.mov')) {
-          // 尝试使用纯路径，去掉查询参数
-          url = '${uri.scheme}://${uri.host}${uri.path}';
+      // 视频URL清理和处理 - 确保正确的视频URL
+      if (isVideo) {
+        // 检查URL是否包含视频下载相关域名
+        bool isVideoUrl = url.contains('photovideo.photo.qq.com') ||
+            url.contains('photovideo.qzone.qq.com') ||
+            url.contains('video.qzone.qq.com');
+
+        // 检查URL是否以.mp4结尾
+        bool hasVideoExtension = url.toLowerCase().endsWith('.mp4') ||
+            url.toLowerCase().endsWith('.mov');
+
+        // 检查URL是否包含缩略图特征
+        bool isThumbnail = url.contains('/m&bo=') ||
+            url.contains('m.qpic.cn') ||
+            (url.contains('/psc?/') && url.contains('/m&'));
+
+        // 检查是否是HTTP URL
+        bool isHttpUrl = url.startsWith('http://');
+
+        if (kDebugMode) {
+          print(
+              "[QZoneService DEBUG] 视频URL分析: isVideoUrl=$isVideoUrl, hasVideoExtension=$hasVideoExtension, isThumbnail=$isThumbnail, isHttpUrl=$isHttpUrl");
+        }
+
+        // 如果是HTTP URL，尝试转换为HTTPS
+        if (isHttpUrl) {
+          url = url.replaceFirst('http://', 'https://');
           if (kDebugMode) {
-            print("[QZoneService] 清理后的视频URL: $url");
+            print("[QZoneService] HTTP URL转换为HTTPS: $url");
+          }
+        }
+
+        // 如果URL是缩略图，尝试构建视频URL
+        if (isThumbnail) {
+          // 尝试从URL中提取lloc或sloc
+          String videoId = '';
+          if (url.contains('lloc=')) {
+            final llocMatch = RegExp(r'lloc=([^&]+)').firstMatch(url);
+            if (llocMatch != null) {
+              videoId = llocMatch.group(1) ?? '';
+            }
+          } else if (url.contains('sloc=')) {
+            final slocMatch = RegExp(r'sloc=([^&]+)').firstMatch(url);
+            if (slocMatch != null) {
+              videoId = slocMatch.group(1) ?? '';
+            }
+          }
+
+          if (videoId.isNotEmpty) {
+            url = 'https://photovideo.photo.qq.com/$videoId.f0.mp4';
+            if (kDebugMode) {
+              print("[QZoneService] 从缩略图URL构建视频URL: $url");
+            }
+          }
+        }
+        // 如果URL包含查询参数，尝试清理
+        else if (url.contains('?')) {
+          try {
+            final uri = Uri.parse(url);
+            if (uri.path.endsWith('.mp4') || uri.path.endsWith('.mov')) {
+              // 尝试使用纯路径，去掉查询参数
+              // 确保使用HTTPS
+              final scheme = uri.scheme == 'http' ? 'https' : uri.scheme;
+              url = '$scheme://${uri.host}${uri.path}';
+              if (kDebugMode) {
+                print("[QZoneService DEBUG] 清理后的视频URL: $url");
+              }
+            }
+          } catch (e) {
+            if (kDebugMode) {
+              print("[QZoneService] 解析视频URL失败: $e");
+            }
+          }
+        }
+
+        // 如果URL不是明显的视频URL，尝试添加.mp4后缀
+        if (!isVideoUrl &&
+            !hasVideoExtension &&
+            !url.contains('download') &&
+            !isThumbnail) {
+          if (!url.endsWith('.mp4')) {
+            url = '$url.mp4';
+            if (kDebugMode) {
+              print("[QZoneService] 添加.mp4后缀: $url");
+            }
           }
         }
       }
@@ -1412,21 +1568,42 @@ class QZoneService {
         // QQ空间的视频响应类型可能不规范，放宽检查条件
         bool isLikelyVideo = false;
 
-        // 检查文件头部特征
+        // 检查文件头部特征 - 这是最可靠的方法
         if (response.data is List<int> && response.data.length > 16) {
           final bytes = response.data as List<int>;
-          bytes.sublist(0, min(16, bytes.length));
 
           // MP4文件头特征：以'ftyp'开头或包含特定字节序列
           if (bytes.length > 8) {
+            // 检查ftyp标记 (ISO Base Media file format)
             if (bytes[4] == 0x66 &&
                 bytes[5] == 0x74 &&
                 bytes[6] == 0x79 &&
                 bytes[7] == 0x70) {
-              // 'ftyp'
               isLikelyVideo = true;
               if (kDebugMode) {
                 print("[QZoneService] 检测到MP4文件特征(ftyp)");
+              }
+            }
+
+            // 检查其他可能的视频文件头
+            // WebM
+            else if (bytes[0] == 0x1A &&
+                bytes[1] == 0x45 &&
+                bytes[2] == 0xDF &&
+                bytes[3] == 0xA3) {
+              isLikelyVideo = true;
+              if (kDebugMode) {
+                print("[QZoneService] 检测到WebM文件特征");
+              }
+            }
+            // AVI
+            else if (bytes[0] == 0x52 &&
+                bytes[1] == 0x49 &&
+                bytes[2] == 0x46 &&
+                bytes[3] == 0x46) {
+              isLikelyVideo = true;
+              if (kDebugMode) {
+                print("[QZoneService] 检测到AVI文件特征");
               }
             }
           }
@@ -1437,20 +1614,52 @@ class QZoneService {
             (contentType.contains('video') ||
                 contentType.contains('octet-stream') ||
                 contentType.contains('mp4') ||
-                contentType.contains('binary'))) {
+                contentType.contains('binary') ||
+                contentType.contains('application/') ||
+                contentType.contains('stream'))) {
           isLikelyVideo = true;
+          if (kDebugMode) {
+            print("[QZoneService] 通过Content-Type判断为视频: $contentType");
+          }
         }
 
         // 通过URL判断
         if (url.toLowerCase().endsWith('.mp4') ||
-            url.toLowerCase().contains('/video/')) {
+            url.toLowerCase().contains('/video/') ||
+            url.toLowerCase().contains('photovideo')) {
           isLikelyVideo = true;
+          if (kDebugMode) {
+            print("[QZoneService] 通过URL判断为视频: $url");
+          }
         }
 
         // 通过文件大小初步判断
         if (response.data.length > 500 * 1024) {
           // 大于500KB可能是视频
           isLikelyVideo = true;
+          if (kDebugMode) {
+            print("[QZoneService] 通过文件大小判断可能是视频: ${response.data.length} 字节");
+          }
+        }
+
+        // 如果文件太小，可能是缩略图或错误的URL
+        if (response.data.length < 10 * 1024) {
+          // 文件太小，但我们不立即判定为非视频
+          // 而是记录警告并继续处理
+          if (kDebugMode) {
+            print("[QZoneService] 警告：文件太小，可能不是视频: ${response.data.length} 字节");
+          }
+
+          // 如果内容类型明确是图片，则判定为非视频
+          if (contentType != null &&
+              (contentType.contains('image/jpeg') ||
+                  contentType.contains('image/png') ||
+                  contentType.contains('image/gif'))) {
+            isLikelyVideo = false;
+            if (kDebugMode) {
+              print("[QZoneService] 内容类型是图片，确定不是视频: $contentType");
+            }
+          }
         }
 
         if (!isLikelyVideo) {
@@ -1458,7 +1667,33 @@ class QZoneService {
             print(
                 "[QZoneService WARNING] 可能不是视频文件: Content-Type=$contentType, 大小=${response.data.length}字节");
           }
+
+          // 尝试保存为图片而不是直接失败
+          if (contentType != null && contentType.contains('image/')) {
+            // 修改文件扩展名
+            if (filename.toLowerCase().endsWith('.mp4')) {
+              final newFilename =
+                  '${filename.substring(0, filename.length - 4)}.jpg';
+              final newFilePath = p.join(savePath, newFilename);
+
+              if (kDebugMode) {
+                print("[QZoneService] 将视频文件保存为图片: $newFilePath");
+              }
+
+              // 写入文件
+              final file = File(newFilePath);
+              await file.writeAsBytes(response.data, flush: true);
+
+              throw QZoneApiException("下载的不是视频文件，已保存为图片。",
+                  underlyingError: Exception("已保存为图片：$newFilename"));
+            }
+          }
+
           throw QZoneApiException("下载的不是视频文件，可能是缩略图或空文件。尝试检查视频URL。");
+        } else {
+          if (kDebugMode) {
+            print("[QZoneService] 确认下载的是视频文件");
+          }
         }
       }
 
@@ -1838,39 +2073,48 @@ class QZoneService {
 
     for (int i = 0; i < allPhotos.length; i++) {
       final photo = allPhotos[i];
-      final String baseFileName = _sanitizeFileName(photo.name);
       String fileExt;
-      String uniqueIdSuffix =
-          ''; // Changed from uniqueId for clarity and applied to both
       String message;
+      String fileName;
 
       // 确定文件类型和扩展名
       if (photo.isVideo) {
         fileExt = '.mp4';
-        message = '${i + 1}/$total: $baseFileName (视频)';
+        message = '${i + 1}/$total: ${photo.name} (视频)';
       } else {
         // Photo
         fileExt = '.jpg';
-        message = '${i + 1}/$total: $baseFileName (照片)';
+        message = '${i + 1}/$total: ${photo.name} (照片)';
       }
 
-      // 为照片和视频都生成 uniqueIdSuffix 以防止文件名冲突
-      if (photo.id.isNotEmpty) {
-        // 使用 photo.id (源自 lloc/sloc) 的一部分来确保唯一性
-        // 取最后12个字符，如果ID较短则取完整ID。前缀为 _id。
-        uniqueIdSuffix = "_id" +
-            (photo.id.length > 12
-                ? photo.id.substring(photo.id.length - 12)
-                : photo.id);
+      // 使用类似Go版本的文件名生成方式
+      String shootDate = photo.shootTime.isNotEmpty
+          ? photo.shootTime
+          : DateTime.now().toString().replaceAll(RegExp(r'[^0-9]'), '');
+
+      // 确保shootDate至少有8个字符
+      if (shootDate.length < 14) {
+        shootDate = shootDate.padRight(14, '0');
+      }
+
+      String sloc = photo.lloc.isNotEmpty
+          ? photo.lloc
+          : (photo.sloc.isNotEmpty ? photo.sloc : photo.id);
+
+      // 生成MD5哈希
+      String md5Hash = _generateMd5(sloc);
+      String md5Part = md5Hash.substring(8, min(24, md5Hash.length));
+
+      // 构建文件名
+      if (photo.isVideo) {
+        fileName =
+            "VID_${shootDate.substring(0, 8)}_${shootDate.substring(8, min(14, shootDate.length))}_$md5Part$fileExt";
       } else {
-        // 如果 photo.id 为空，则使用时间戳作为后备唯一标识符
-        // 使用 "ts" 前缀以区别于基于 "id" 的后缀
-        uniqueIdSuffix =
-            "_ts" + DateTime.now().millisecondsSinceEpoch.toString();
+        fileName =
+            "IMG_${shootDate.substring(0, 8)}_${shootDate.substring(8, min(14, shootDate.length))}_$md5Part$fileExt";
       }
 
-      // 构建完整的文件名和路径
-      final String fileName = baseFileName + uniqueIdSuffix + fileExt;
+      // 构建完整的文件路径
       final String filePath = '$albumPath/$fileName';
       final File file = File(filePath);
 
@@ -1881,20 +2125,75 @@ class QZoneService {
 
       // 检查文件是否已存在
       if (skipExisting && await file.exists()) {
-        skipped++;
-        if (onProgress != null) {
-          onProgress(i + 1, total, '$message - 已跳过(已存在)');
+        try {
+          // 获取远程文件大小
+          String url =
+              photo.isVideo ? (photo.videoUrl ?? '') : (photo.url ?? '');
+          if (url.isEmpty) {
+            throw Exception('URL为空');
+          }
+
+          final response = await _dio.head(
+            url,
+            options: Options(
+              headers: {
+                'User-Agent': QZoneApiConstants.userAgent,
+                'Referer': 'https://user.qzone.qq.com/',
+                'Cookie':
+                    await _getFullCookieString('https://user.qzone.qq.com/'),
+              },
+            ),
+          );
+
+          final remoteSize =
+              int.parse(response.headers.value('content-length') ?? '0');
+          final localSize = await file.length();
+
+          // 只有当本地文件大小大于等于远程文件大小时才跳过
+          if (localSize >= remoteSize && remoteSize > 0) {
+            skipped++;
+            if (onProgress != null) {
+              onProgress(i + 1, total, '$message - 已跳过(已存在且完整)');
+            }
+            if (onItemComplete != null) {
+              onItemComplete({
+                'status': 'skipped',
+                'message': '文件已存在且完整',
+                'filename': fileName,
+                'path': filePath,
+                'photo': photo,
+              });
+            }
+            continue;
+          } else {
+            // 文件存在但不完整，删除后重新下载
+            await file.delete();
+            if (kDebugMode) {
+              print(
+                  "[QZoneService] 文件存在但不完整，重新下载: $fileName (本地: $localSize, 远程: $remoteSize)");
+            }
+          }
+        } catch (e) {
+          // 获取远程文件大小失败，保守起见不跳过
+          if (kDebugMode) {
+            print("[QZoneService] 检查远程文件大小失败: $e");
+          }
+          // 如果无法获取远程文件大小，仍然跳过已存在的文件
+          skipped++;
+          if (onProgress != null) {
+            onProgress(i + 1, total, '$message - 已跳过(已存在，无法验证完整性)');
+          }
+          if (onItemComplete != null) {
+            onItemComplete({
+              'status': 'skipped',
+              'message': '文件已存在，无法验证完整性',
+              'filename': fileName,
+              'path': filePath,
+              'photo': photo,
+            });
+          }
+          continue;
         }
-        if (onItemComplete != null) {
-          onItemComplete({
-            'status': 'skipped',
-            'message': '文件已存在',
-            'filename': fileName,
-            'path': filePath,
-            'photo': photo,
-          });
-        }
-        continue;
       }
 
       try {
@@ -2212,6 +2511,22 @@ class QZoneService {
             }
 
             if (photoUrl != null || thumbUrl != null) {
+              // 获取拍摄时间
+              String shootTime = '';
+              if (photoJson['shootTime'] != null) {
+                shootTime = photoJson['shootTime'].toString();
+              } else if (photoJson['uploadTime'] != null) {
+                // 如果没有拍摄时间，使用上传时间
+                shootTime = photoJson['uploadTime'].toString();
+              } else {
+                // 如果都没有，使用当前时间
+                shootTime = DateTime.now().millisecondsSinceEpoch.toString();
+              }
+
+              // 获取位置信息
+              String lloc = photoJson['lloc']?.toString() ?? '';
+              String sloc = photoJson['sloc']?.toString() ?? '';
+
               allPhotos.add(Photo(
                 id: photoJson['lloc']?.toString() ??
                     photoJson['sloc']?.toString() ??
@@ -2225,6 +2540,9 @@ class QZoneService {
                 height: (photoJson['height'] as num?)?.toInt(),
                 isVideo: isVideo,
                 videoUrl: videoUrl,
+                shootTime: shootTime,
+                lloc: lloc,
+                sloc: sloc,
               ));
             }
           }
@@ -2245,15 +2563,9 @@ class QZoneService {
     return allPhotos;
   }
 
-  // 文件名清理（移除不合法字符）
-  String _sanitizeFileName(String fileName) {
-    // 替换不允许用于文件名的字符
-    final sanitized = fileName
-        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_') // 替换Windows不允许的字符
-        .replaceAll(RegExp(r'[\x00-\x1F]'), '') // 替换控制字符
-        .trim(); // 移除首尾空格
-
-    return sanitized.isEmpty ? '未命名文件' : sanitized;
+  // 生成MD5哈希
+  String _generateMd5(String input) {
+    return md5.convert(utf8.encode(input)).toString();
   }
 
   // 获取完整的Cookie字符串，用于图片请求

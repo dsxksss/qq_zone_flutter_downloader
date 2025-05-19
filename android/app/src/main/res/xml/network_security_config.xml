@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">photogz.photo.store.qq.com</domain>
+        <domain includeSubdomains="true">photo.store.qq.com</domain>
+        <domain includeSubdomains="true">qzone.qq.com</domain>
+        <domain includeSubdomains="true">qq.com</domain>
+    </domain-config>
+</network-security-config>

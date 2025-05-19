@@ -1,15 +1,21 @@
-
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
+import 'package:path/path.dart' as p;
 import 'package:qq_zone_flutter_downloader/core/models/download_record.dart';
 import 'package:qq_zone_flutter_downloader/core/providers/service_providers.dart';
+import 'package:qq_zone_flutter_downloader/presentation/download/file_viewer_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class DownloadRecordsScreen extends ConsumerStatefulWidget {
   const DownloadRecordsScreen({super.key});
 
   @override
-  ConsumerState<DownloadRecordsScreen> createState() => _DownloadRecordsScreenState();
+  ConsumerState<DownloadRecordsScreen> createState() =>
+      _DownloadRecordsScreenState();
 }
 
 class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
@@ -18,37 +24,74 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
   bool _isLoading = true;
   bool _isSelectMode = false;
   Set<String> _selectedRecords = {};
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _loadRecords();
+
+    // 设置定时器，每3秒自动刷新一次下载进度和记录
+    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) {
+        // 无论是否有活跃下载都刷新，确保下载完成后记录也能更新
+        _loadRecords();
+        if (kDebugMode) {
+          print("[DownloadRecords] 自动刷新下载记录");
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadRecords() async {
-    setState(() {
-      _isLoading = true;
-    });
+    // 如果是自动刷新（定时器触发），不显示加载状态
+    bool isAutoRefresh =
+        _refreshTimer != null && _refreshTimer!.isActive && !_isLoading;
+
+    if (!isAutoRefresh) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
 
     try {
       final recordService = ref.read(downloadRecordServiceProvider);
+
+      // 强制重新初始化记录服务，确保从磁盘读取最新数据
+      await recordService.initialize(forceReload: true);
+
+      // 获取完整的记录列表和活跃下载
       final records = await recordService.getAllRecords();
       final activeDownloads = await recordService.getActiveDownloads();
 
-      setState(() {
-        _records = records.where((r) => r.isComplete).toList(); // 只显示已完成的下载
-        _activeDownloads = activeDownloads; // 活跃下载单独存储
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      
       if (mounted) {
+        setState(() {
+          _records = records.where((r) => r.isComplete).toList(); // 只显示已完成的下载
+          _activeDownloads = activeDownloads; // 活跃下载单独存储
+          if (!isAutoRefresh) {
+            _isLoading = false;
+          }
+        });
+      }
+    } catch (e) {
+      if (!isAutoRefresh && mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('加载下载记录失败: $e')),
         );
+      }
+
+      if (kDebugMode) {
+        print("[DownloadRecords] 加载记录失败: $e");
       }
     }
   }
@@ -86,48 +129,117 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
   // 删除所选记录
   Future<void> _deleteSelectedRecords() async {
     if (_selectedRecords.isEmpty) return;
-    
-    // 显示确认对话框
-    final result = await showDialog<bool>(
+
+    // 显示确认对话框，提供删除文件选项
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) => FDialog(
-        title: const Text('确认删除'),
-        body: Text('确定要删除所选的 ${_selectedRecords.length} 条下载记录吗？\n注意：这只会删除记录，不会删除已下载的文件。'),
-        actions: [
-          FButton(
-            style: FButtonStyle.outline,
-            onPress: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+      builder: (context) {
+        bool deleteFiles = false;
+
+        return StatefulBuilder(
+          builder: (context, setState) => FDialog(
+            title: const Text('确认删除'),
+            body: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('确定要删除所选的 ${_selectedRecords.length} 条下载记录吗？'),
+                const SizedBox(height: 16),
+                Material(
+                  color: Colors.transparent,
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: deleteFiles,
+                        onChanged: (value) {
+                          setState(() {
+                            deleteFiles = value ?? false;
+                          });
+                        },
+                      ),
+                      const Text('同时删除已下载的文件'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              FButton(
+                style: FButtonStyle.outline,
+                onPress: () => Navigator.of(context).pop(null),
+                child: const Text('取消'),
+              ),
+              FButton(
+                onPress: () => Navigator.of(context).pop({
+                  'confirmed': true,
+                  'deleteFiles': deleteFiles,
+                }),
+                child: const Text('确认删除'),
+              ),
+            ],
           ),
-          FButton(
-            onPress: () => Navigator.of(context).pop(true),
-            child: const Text('确认删除'),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
-    if (result == true && mounted) {
+    if (result != null && result['confirmed'] == true && mounted) {
+      // 显示加载对话框
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => FDialog(
+          title: const Text('正在删除'),
+          body: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: 16),
+              Center(child: FProgress()),
+              SizedBox(height: 16),
+              Text('正在删除文件，请稍候...'),
+            ],
+          ),
+          actions: [
+            // 不提供任何按钮，强制用户等待
+          ],
+        ),
+      );
+
       try {
         final recordService = ref.read(downloadRecordServiceProvider);
-        await recordService.deleteRecords(_selectedRecords.toList());
-        
+        final bool deleteFiles = result['deleteFiles'] ?? false;
+
+        await recordService.deleteRecords(_selectedRecords.toList(),
+            deleteFiles: deleteFiles);
+
+        // 关闭加载对话框
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+
         // 刷新列表
         await _loadRecords();
-        
+
         // 退出选择模式
         setState(() {
           _isSelectMode = false;
           _selectedRecords.clear();
         });
-        
+
         if (mounted) {
+          String message = '已删除所选记录';
+          if (deleteFiles) {
+            message += '及相关文件';
+          }
+
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('已删除所选记录')),
+            SnackBar(content: Text(message)),
           );
         }
       } catch (e) {
+        // 关闭加载对话框
         if (mounted) {
+          Navigator.of(context).pop();
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('删除记录失败: $e')),
           );
@@ -138,41 +250,109 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
 
   // 删除单个记录
   Future<void> _deleteRecord(DownloadRecord record) async {
-    // 显示确认对话框
-    final result = await showDialog<bool>(
+    // 显示确认对话框，提供删除文件选项
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) => FDialog(
-        title: const Text('确认删除'),
-        body: Text('确定要删除"${record.albumName}"的下载记录吗？\n注意：这只会删除记录，不会删除已下载的文件。'),
-        actions: [
-          FButton(
-            style: FButtonStyle.outline,
-            onPress: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+      builder: (context) {
+        bool deleteFiles = false;
+
+        return StatefulBuilder(
+          builder: (context, setState) => FDialog(
+            title: const Text('确认删除'),
+            body: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('确定要删除"${record.albumName}"的下载记录吗？'),
+                const SizedBox(height: 16),
+                Material(
+                  color: Colors.transparent,
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: deleteFiles,
+                        onChanged: (value) {
+                          setState(() {
+                            deleteFiles = value ?? false;
+                          });
+                        },
+                      ),
+                      const Text('同时删除已下载的文件'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              FButton(
+                style: FButtonStyle.outline,
+                onPress: () => Navigator.of(context).pop(null),
+                child: const Text('取消'),
+              ),
+              FButton(
+                onPress: () => Navigator.of(context).pop({
+                  'confirmed': true,
+                  'deleteFiles': deleteFiles,
+                }),
+                child: const Text('确认删除'),
+              ),
+            ],
           ),
-          FButton(
-            onPress: () => Navigator.of(context).pop(true),
-            child: const Text('确认删除'),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
-    if (result == true && mounted) {
+    if (result != null && result['confirmed'] == true && mounted) {
+      // 显示加载对话框
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => FDialog(
+          title: const Text('正在删除'),
+          body: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: 16),
+              Center(child: FProgress()),
+              SizedBox(height: 16),
+              Text('正在删除文件，请稍候...'),
+            ],
+          ),
+          actions: [
+            // 不提供任何按钮，强制用户等待
+          ],
+        ),
+      );
+
       try {
         final recordService = ref.read(downloadRecordServiceProvider);
-        await recordService.deleteRecord(record.id);
-        
+        final bool deleteFiles = result['deleteFiles'] ?? false;
+
+        await recordService.deleteRecord(record.id, deleteFiles: deleteFiles);
+
+        // 关闭加载对话框
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+
         // 刷新列表
         await _loadRecords();
-        
+
         if (mounted) {
+          String message = '已删除"${record.albumName}"的下载记录';
+          if (deleteFiles) {
+            message += '及相关文件';
+          }
+
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('已删除"${record.albumName}"的下载记录')),
+            SnackBar(content: Text(message)),
           );
         }
       } catch (e) {
+        // 关闭加载对话框
         if (mounted) {
+          Navigator.of(context).pop();
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('删除记录失败: $e')),
           );
@@ -206,10 +386,10 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
       try {
         final downloadManager = ref.read(downloadManagerProvider.notifier);
         await downloadManager.cancelDownload(record.id);
-        
+
         // 刷新列表
         await _loadRecords();
-        
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('已取消"${record.albumName}"的下载')),
@@ -224,52 +404,120 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
       }
     }
   }
-  
+
   // 清理所有记录
   Future<void> _clearAllRecords() async {
     if (_records.isEmpty) return;
-    
-    // 显示确认对话框
-    final result = await showDialog<bool>(
+
+    // 显示确认对话框，提供删除文件选项
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) => FDialog(
-        title: const Text('清空所有记录'),
-        body: const Text('确定要清空所有下载记录吗？\n注意：这只会删除记录，不会删除已下载的文件。'),
-        actions: [
-          FButton(
-            style: FButtonStyle.outline,
-            onPress: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+      builder: (context) {
+        bool deleteFiles = false;
+
+        return StatefulBuilder(
+          builder: (context, setState) => FDialog(
+            title: const Text('清空所有记录'),
+            body: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('确定要清空所有下载记录吗？'),
+                const SizedBox(height: 16),
+                Material(
+                  color: Colors.transparent,
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: deleteFiles,
+                        onChanged: (value) {
+                          setState(() {
+                            deleteFiles = value ?? false;
+                          });
+                        },
+                      ),
+                      const Text('同时删除所有已下载的文件'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              FButton(
+                style: FButtonStyle.outline,
+                onPress: () => Navigator.of(context).pop(null),
+                child: const Text('取消'),
+              ),
+              FButton(
+                onPress: () => Navigator.of(context).pop({
+                  'confirmed': true,
+                  'deleteFiles': deleteFiles,
+                }),
+                child: const Text('确认清空'),
+              ),
+            ],
           ),
-          FButton(
-            onPress: () => Navigator.of(context).pop(true),
-            child: const Text('确认清空'),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
-    if (result == true && mounted) {
+    if (result != null && result['confirmed'] == true && mounted) {
+      // 显示加载对话框
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => FDialog(
+          title: const Text('正在清空记录'),
+          body: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: 16),
+              Center(child: FProgress()),
+              SizedBox(height: 16),
+              Text('正在删除文件，请稍候...'),
+            ],
+          ),
+          actions: [
+            // 不提供任何按钮，强制用户等待
+          ],
+        ),
+      );
+
       try {
         final recordService = ref.read(downloadRecordServiceProvider);
-        await recordService.clearAllRecords();
-        
+        final bool deleteFiles = result['deleteFiles'] ?? false;
+
+        await recordService.clearAllRecords(deleteFiles: deleteFiles);
+
+        // 关闭加载对话框
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+
         // 刷新列表
         await _loadRecords();
-        
+
         // 退出选择模式
         setState(() {
           _isSelectMode = false;
           _selectedRecords.clear();
         });
-        
+
         if (mounted) {
+          String message = '已清空所有下载记录';
+          if (deleteFiles) {
+            message += '及相关文件';
+          }
+
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('已清空所有下载记录')),
+            SnackBar(content: Text(message)),
           );
         }
       } catch (e) {
+        // 关闭加载对话框
         if (mounted) {
+          Navigator.of(context).pop();
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('清空记录失败: $e')),
           );
@@ -277,20 +525,20 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
       }
     }
   }
-  
+
   // 清理无效记录（文件已删除的记录）
   Future<void> _cleanupInvalidRecords() async {
     setState(() {
       _isLoading = true;
     });
-    
+
     try {
       final recordService = ref.read(downloadRecordServiceProvider);
       final removedCount = await recordService.cleanupNonExistentRecords();
-      
+
       // 刷新列表
       await _loadRecords();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('清理完成，已移除 $removedCount 条无效记录')),
@@ -300,7 +548,7 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
       setState(() {
         _isLoading = false;
       });
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('清理无效记录失败: $e')),
@@ -311,6 +559,19 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 监听下载管理器状态变化
+    ref.listen(downloadManagerProvider, (previous, next) {
+      // 当下载管理器状态变化时，刷新活跃下载列表
+      if (previous?.activeDownloads.length != next.activeDownloads.length ||
+          previous?.activeDownloads.keys.toString() !=
+              next.activeDownloads.keys.toString()) {
+        if (kDebugMode) {
+          print("[DownloadRecords] 下载管理器状态变化，刷新活跃下载列表");
+        }
+        _loadRecords();
+      }
+    });
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('下载记录'),
@@ -328,7 +589,8 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
           if (_isSelectMode)
             IconButton(
               icon: const Icon(Icons.delete),
-              onPressed: _selectedRecords.isNotEmpty ? _deleteSelectedRecords : null,
+              onPressed:
+                  _selectedRecords.isNotEmpty ? _deleteSelectedRecords : null,
               tooltip: '删除所选',
             ),
           IconButton(
@@ -424,7 +686,8 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
                   child: const Icon(Icons.downloading, color: Colors.white),
                 ),
                 title: Text(record.albumName),
-                subtitle: Text('总数: ${record.totalCount} 下载中: ${record.currentProgress}/${record.totalCount}'),
+                subtitle: Text(
+                    '总数: ${record.totalCount} 下载中: ${record.currentProgress}/${record.totalCount}'),
                 trailing: IconButton(
                   icon: const Icon(Icons.cancel),
                   onPressed: () => _cancelDownload(record),
@@ -442,11 +705,13 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
                           child: LinearProgressIndicator(
                             value: record.progressPercentage,
                             backgroundColor: Colors.grey[200],
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.blue),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text('${(record.progressPercentage * 100).toStringAsFixed(1)}%'),
+                        Text(
+                            '${(record.progressPercentage * 100).toStringAsFixed(1)}%'),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -462,6 +727,114 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
     }).toList();
   }
 
+  // 打开文件夹
+  Future<void> _openFolder(DownloadRecord record) async {
+    try {
+      final String folderPath;
+      if (record.filename != null) {
+        // 单个文件下载，打开文件所在目录
+        folderPath = record.savePath;
+      } else {
+        // 相册下载，打开相册目录
+        folderPath = '${record.savePath}/${record.albumName}';
+      }
+
+      // 使用系统文件管理器打开文件夹
+      final result = await launchUrl(Uri.file(folderPath));
+
+      if (!result && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('无法打开文件夹: $folderPath')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('打开文件夹失败: $e')),
+        );
+      }
+    }
+  }
+
+  // 查看文件
+  Future<void> _viewFiles(DownloadRecord record) async {
+    try {
+      final String path;
+      final List<FileSystemEntity> files = [];
+
+      if (record.filename != null) {
+        // 单个文件下载
+        path = '${record.savePath}/${record.filename}';
+        final file = File(path);
+        if (await file.exists()) {
+          files.add(file);
+        }
+      } else {
+        // 相册下载，获取所有文件
+        path = '${record.savePath}/${record.albumName}';
+        final directory = Directory(path);
+        if (await directory.exists()) {
+          files.addAll(await directory
+              .list()
+              .where((entity) => entity is File)
+              .toList());
+        }
+      }
+
+      if (files.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('没有找到文件')),
+          );
+        }
+        return;
+      }
+
+      // 过滤和排序文件
+      final List<String> filePaths = files.map((e) => e.path).where((path) {
+        // 只显示图片和视频文件
+        final ext = p.extension(path).toLowerCase();
+        return ext == '.jpg' ||
+            ext == '.jpeg' ||
+            ext == '.png' ||
+            ext == '.gif' ||
+            ext == '.mp4' ||
+            ext == '.mov';
+      }).toList();
+
+      // 按文件名排序
+      filePaths.sort();
+
+      if (filePaths.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('没有找到可显示的图片或视频文件')),
+          );
+        }
+        return;
+      }
+
+      // 打开文件查看器
+      if (mounted) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => FileViewerScreen(
+              title: record.albumName,
+              files: filePaths,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('查看文件失败: $e')),
+        );
+      }
+    }
+  }
+
   // 创建完成下载卡片
   List<Widget> _buildCompletedDownloadCards() {
     return _records.map((record) {
@@ -474,31 +847,38 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
               if (_isSelectMode)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        value: _selectedRecords.contains(record.id),
-                        onChanged: (value) {
-                          if (value == true) {
-                            _toggleSelectRecord(record.id);
-                          } else {
-                            _toggleSelectRecord(record.id);
-                          }
-                        },
-                      ),
-                      const Text('选择'),
-                    ],
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Row(
+                      children: [
+                        Checkbox(
+                          value: _selectedRecords.contains(record.id),
+                          onChanged: (value) {
+                            if (value == true) {
+                              _toggleSelectRecord(record.id);
+                            } else {
+                              _toggleSelectRecord(record.id);
+                            }
+                          },
+                        ),
+                        const Text('选择'),
+                      ],
+                    ),
                   ),
                 ),
               ListTile(
                 leading: CircleAvatar(
                   backgroundColor: record.statusText == '下载完成'
                       ? Colors.green
-                      : (record.statusText == '部分完成' ? Colors.amber : Colors.red),
+                      : (record.statusText == '部分完成'
+                          ? Colors.amber
+                          : Colors.red),
                   child: Icon(
                     record.statusText == '下载完成'
                         ? Icons.check
-                        : (record.statusText == '部分完成' ? Icons.warning : Icons.error),
+                        : (record.statusText == '部分完成'
+                            ? Icons.warning
+                            : Icons.error),
                     color: Colors.white,
                   ),
                 ),
@@ -521,6 +901,22 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
                     Text('状态: ${record.statusText}'),
                     Text('下载时间: ${record.formattedDownloadTime}'),
                     Text('保存位置: ${record.savePath}'),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        FButton(
+                          style: FButtonStyle.outline,
+                          onPress: () => _openFolder(record),
+                          child: const Text('打开文件夹'),
+                        ),
+                        const SizedBox(width: 8),
+                        FButton(
+                          onPress: () => _viewFiles(record),
+                          child: const Text('查看文件'),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -530,4 +926,4 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
       );
     }).toList();
   }
-} 
+}
