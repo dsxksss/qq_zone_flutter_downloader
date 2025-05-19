@@ -227,11 +227,11 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
       // 错误可能包含"对不起，回答错误"或"code: -10805"，尝试备用加载方法
       try {
         final qzoneService = ref.read(qZoneServiceProvider);
-        
+
         if (kDebugMode) {
           print("[AlbumDetails] 尝试直接下载相册获取照片...");
         }
-        
+
         // 直接使用下载方法，而不是反射调用私有方法
         final tempDir = await getTemporaryDirectory();
         final result = await qzoneService.downloadAlbum(
@@ -240,14 +240,14 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
           targetUin: widget.targetUin,
           skipExisting: true,
         );
-        
+
         if (result['success'] > 0 && mounted) {
           // 重新加载照片列表
           final photos = await qzoneService.getPhotoList(
             albumId: widget.album.id,
             targetUin: widget.targetUin,
           );
-          
+
           if (photos.isNotEmpty && mounted) {
             setState(() {
               _photos = photos;
@@ -268,10 +268,9 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
       if (mounted) {
         // 检查错误是否包含"对不起，回答错误"或"code: -10805"，这表示这是一个加密相册
         final String errorStr = e.toString().toLowerCase();
-        final bool isEncryptedAlbumError = 
-          errorStr.contains("回答错误") || 
-          errorStr.contains("code: -10805") ||
-          errorStr.contains("访问权限");
+        final bool isEncryptedAlbumError = errorStr.contains("回答错误") ||
+            errorStr.contains("code: -10805") ||
+            errorStr.contains("访问权限");
 
         setState(() {
           if (isEncryptedAlbumError) {
@@ -353,14 +352,18 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
         });
 
         // 显示一个简短的提示，但不阻止用户继续浏览已加载的照片
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("加载更多照片失败: ${e.toString()}"),
-            duration: const Duration(seconds: 3),
-            action: SnackBarAction(
-              label: '重试',
-              onPressed: _loadMorePhotos,
-            ),
+        showDialog(
+          context: context,
+          builder: (context) => FDialog(
+            title: const Text('加载更多照片失败'),
+            body: Text(e.toString()),
+            actions: [
+              FButton(
+                style: FButtonStyle.outline,
+                onPress: _loadMorePhotos,
+                child: const Text('重试'),
+              ),
+            ],
           ),
         );
       }
@@ -455,56 +458,55 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
       // 获取保存路径
       final savePath = await _getPhotoSaveDirectory();
 
-      // 使用下载管理器开始下载
+      // 使用下载管理器开始下载 - 移除await，让下载在后台进行
       final downloadManager = ref.read(downloadManagerProvider.notifier);
-      await downloadManager.downloadAlbum(
+      downloadManager.downloadAlbum(
         album: widget.album,
         savePath: savePath,
         targetUin: widget.targetUin,
         skipExisting: true,
       );
 
+      // 立即更新UI状态，不等待下载完成
       if (mounted) {
         setState(() {
           _isDownloading = false;
-          _downloadProgress = 1.0;
-          _downloadMessage = '下载已在后台开始，可在下载记录中查看进度';
         });
 
-        // 显示消息并自动隐藏进度条
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('已开始下载"${widget.album.name}"，可在下载记录中查看进度'),
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: '查看',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const DownloadRecordsScreen(),
-                  ),
-                );
-              },
-            ),
+        // 显示开始下载的通知
+        showDialog(
+          context: context,
+          builder: (context) => FDialog(
+            title: const Text('下载开始'),
+            body: Text('已开始下载"${widget.album.name}"，可在下载记录中查看进度'),
+            actions: [
+              FButton(
+                style: FButtonStyle.outline,
+                onPress: () => Navigator.of(context).pop(),
+                child: const Text('关闭'),
+              ),
+              FButton(
+                onPress: () {
+                  Navigator.of(context).pop();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const DownloadRecordsScreen(),
+                    ),
+                  );
+                },
+                child: const Text('查看'),
+              ),
+            ],
           ),
         );
-        
-        // 2秒后自动隐藏进度条
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            setState(() {
-              _isDownloading = false;
-            });
-          }
-        });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _isDownloading = false;
         });
-        
+
         showDialog(
           context: context,
           builder: (context) => FDialog(
@@ -576,19 +578,8 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // 使用不确定的进度条显示状态
-                                _downloadProgress <= 0 || _downloadProgress >= 1
-                                  ? LinearProgressIndicator(
-                                      backgroundColor: Colors.grey[200],
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                          Colors.blue),
-                                    )
-                                  : LinearProgressIndicator(
-                                      value: _downloadProgress,
-                                      backgroundColor: Colors.grey[200],
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                          Colors.blue),
-                                    ),
+                                // 使用ForUI的FProgress组件
+                                const FProgress(),
                                 const SizedBox(height: 4),
                                 Text(
                                   _downloadMessage,
@@ -601,9 +592,11 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            _downloadProgress <= 0 ? '准备中' :
-                            _downloadProgress >= 1 ? '完成' :
-                            '${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                            _downloadProgress <= 0
+                                ? '准备中'
+                                : _downloadProgress >= 1
+                                    ? '完成'
+                                    : '${(_downloadProgress * 100).toStringAsFixed(1)}%',
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
@@ -630,21 +623,31 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
-                        _errorMessage!.contains("加密相册") ? Icons.lock : Icons.error,
-                        color: _errorMessage!.contains("加密相册") ? Colors.amber : Colors.red,
+                        _errorMessage!.contains("加密相册")
+                            ? Icons.lock
+                            : Icons.error,
+                        color: _errorMessage!.contains("加密相册")
+                            ? Colors.amber
+                            : Colors.red,
                         size: 48,
                       ),
                       const SizedBox(height: 16),
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: _errorMessage!.contains("加密相册") ? Colors.amber.withValues(red: 255, green: 193, blue: 7, alpha: 0.1) : Colors.red.withValues(red: 255, green: 0, blue: 0, alpha: 0.1),
+                          color: _errorMessage!.contains("加密相册")
+                              ? Colors.amber.withValues(
+                                  red: 255, green: 193, blue: 7, alpha: 0.1)
+                              : Colors.red.withValues(
+                                  red: 255, green: 0, blue: 0, alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
                           _errorMessage!,
                           style: TextStyle(
-                            color: _errorMessage!.contains("加密相册") ? Colors.amber[900] : Colors.red,
+                            color: _errorMessage!.contains("加密相册")
+                                ? Colors.amber[900]
+                                : Colors.red,
                             fontSize: 14,
                           ),
                           textAlign: TextAlign.center,
@@ -714,9 +717,12 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
                                 imageBuilder: (context, imageProvider) {
                                   // 尝试使用自定义图片加载器
                                   return Image(
-                                    image: QzoneImageProvider(photo.thumbUrl!, ref),
+                                    image: QzoneImageProvider(
+                                        photo.thumbUrl!, ref),
                                     fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) => Container(
+                                    errorBuilder:
+                                        (context, error, stackTrace) =>
+                                            Container(
                                       color: Colors.grey[300],
                                       child: const Icon(
                                         Icons.broken_image,
@@ -813,22 +819,18 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: double.infinity,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.info_outline, color: Colors.blue, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '正在下载: $_downloadMessage',
-                      style: const TextStyle(fontSize: 14),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+            Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '正在下载: $_downloadMessage',
+                    style: const TextStyle(fontSize: 14),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
         ),
@@ -946,9 +948,18 @@ class _PhotoGalleryScreenState extends ConsumerState<PhotoGalleryScreen> {
         setState(() {
           _isVideoLoading = false;
         });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("视频加载失败: ${e.toString()}")),
+        showDialog(
+          context: context,
+          builder: (context) => FDialog(
+            title: const Text('视频加载失败'),
+            body: Text(e.toString()),
+            actions: [
+              FButton(
+                onPress: () => Navigator.of(context).pop(),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
         );
       }
     }
@@ -1014,7 +1025,7 @@ class _PhotoGalleryScreenState extends ConsumerState<PhotoGalleryScreen> {
                 if (item.isVideo) {
                   if (_isVideoLoading) {
                     return const Center(
-                      child: CircularProgressIndicator(),
+                      child: FProgress(),
                     );
                   }
 
@@ -1057,7 +1068,7 @@ class _PhotoGalleryScreenState extends ConsumerState<PhotoGalleryScreen> {
                     minScale: PhotoViewComputedScale.contained,
                     maxScale: PhotoViewComputedScale.covered * 2,
                     loadingBuilder: (context, event) => const Center(
-                      child: CircularProgressIndicator(),
+                      child: FProgress(),
                     ),
                     errorBuilder: (context, error, stackTrace) => const Center(
                       child: Icon(

@@ -8,7 +8,6 @@ import 'package:qq_zone_flutter_downloader/core/providers/service_providers.dart
 import 'package:qq_zone_flutter_downloader/presentation/login/login_screen.dart';
 import 'package:qq_zone_flutter_downloader/presentation/album/album_details_screen.dart';
 import 'package:qq_zone_flutter_downloader/presentation/download/download_records_screen.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart'; // 导入 FontAwesome
 import 'package:qq_zone_flutter_downloader/core/providers/qzone_image_provider.dart'; // 导入QzoneImageProvider
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -114,11 +113,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
       if (mounted) {
         // 确保相册有效且至少有一张照片
-        final validAlbums = albums.where((album) => 
-          album.id.isNotEmpty && 
-          album.photoCount > 0
-        ).toList();
-        
+        final validAlbums = albums
+            .where((album) => album.id.isNotEmpty && album.photoCount > 0)
+            .toList();
+
         setState(() {
           _albums = validAlbums;
           _isLoadingAlbums = false;
@@ -294,7 +292,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
-
     return Material(
       child: Scaffold(
         appBar: AppBar(
@@ -378,9 +375,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               padding: const EdgeInsets.all(12.0),
               margin: const EdgeInsets.only(bottom: 16.0),
               decoration: BoxDecoration(
-                color: Colors.blue.withValues(red: 0, green: 0, blue: 255, alpha: 0.1),
+                color: Colors.blue
+                    .withValues(red: 0, green: 0, blue: 255, alpha: 0.1),
                 borderRadius: BorderRadius.circular(8.0),
-                border: Border.all(color: Colors.blue.withValues(red: 0, green: 0, blue: 255, alpha: 0.3)),
+                border: Border.all(
+                    color: Colors.blue
+                        .withValues(red: 0, green: 0, blue: 255, alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -459,8 +459,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                FaIcon(
-                                  FontAwesomeIcons.folderOpen,
+                                Icon(
+                                  Icons.folder_open,
                                   size: 54,
                                   color: Colors.grey,
                                 ),
@@ -509,10 +509,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             controller: _searchController,
             decoration: InputDecoration(
               hintText: '搜索QQ好友（昵称或QQ号）',
-              prefixIcon: const FaIcon(FontAwesomeIcons.magnifyingGlass, size: 18),
+              prefixIcon: const Icon(Icons.search, size: 18),
               suffixIcon: _searchController.text.isNotEmpty
                   ? IconButton(
-                      icon: const FaIcon(FontAwesomeIcons.xmark, size: 18),
+                      icon: const Icon(Icons.close, size: 18),
                       onPressed: () {
                         _searchController.clear();
                       },
@@ -528,13 +528,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
           const SizedBox(height: 16),
 
-                          // 好友列表标题和刷新按钮
+          // 好友列表标题和刷新按钮
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Row(
                 children: [
-                  FaIcon(FontAwesomeIcons.users, size: 18),
+                  Icon(Icons.people, size: 18),
                   SizedBox(width: 8),
                   Text(
                     '好友列表',
@@ -548,7 +548,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    FaIcon(FontAwesomeIcons.arrowsRotate, size: 14),
+                    Icon(Icons.refresh, size: 14),
                     SizedBox(width: 4),
                     Text('刷新'),
                   ],
@@ -643,8 +643,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    FaIcon(
-                      FontAwesomeIcons.userSlash,
+                    Icon(
+                      Icons.person_off,
                       size: 54,
                       color: Colors.grey,
                     ),
@@ -663,8 +663,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    FaIcon(
-                      FontAwesomeIcons.userGroup,
+                    Icon(
+                      Icons.group,
                       size: 54,
                       color: Colors.grey,
                     ),
@@ -761,8 +761,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             return Container(
                               color: Colors.grey[200],
                               child: const Center(
-                                child: FaIcon(
-                                  FontAwesomeIcons.images,
+                                child: Icon(
+                                  Icons.photo_library,
                                   size: 48,
                                   color: Colors.grey,
                                 ),
@@ -773,8 +773,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       : Container(
                           color: Colors.grey[200],
                           child: const Center(
-                            child: FaIcon(
-                              FontAwesomeIcons.images,
+                            child: Icon(
+                              Icons.photo_library,
                               size: 48,
                               color: Colors.grey,
                             ),
@@ -797,8 +797,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const FaIcon(
-                            FontAwesomeIcons.image,
+                          const Icon(
+                            Icons.image,
                             size: 12,
                             color: Colors.white,
                           ),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:forui/forui.dart'; // 导入 forui
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // 如果使用 Riverpod
-// 导入 FontAwesome
 
 // 假设您的登录界面会在这里
 import 'package:qq_zone_flutter_downloader/presentation/splash/splash_screen.dart'; // 导入启动屏幕
