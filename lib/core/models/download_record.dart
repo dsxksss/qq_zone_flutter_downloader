@@ -7,14 +7,18 @@ class DownloadRecord {
   final String targetUin; // 所属QQ
   final String savePath; // 保存路径
   final int totalCount; // 总数量
-  final int successCount; // 成功数量
-  final int failedCount; // 失败数量
-  final int skippedCount; // 跳过数量
-  final bool isComplete; // 是否完成
+  int successCount; // 成功数量
+  int failedCount; // 失败数量
+  int skippedCount; // 跳过数量
+  bool isComplete; // 是否完成
   final DateTime downloadTime; // 下载时间
   final bool isVideo; // 是否为视频
   final String? thumbnailUrl; // 缩略图URL
   final String? filename; // 单个文件名称（批量下载为null）
+  // 新增字段
+  int currentProgress; // 当前进度（已处理数量）
+  String currentMessage; // 当前状态消息
+  DateTime lastUpdated; // 最后更新时间
 
   DownloadRecord({
     required this.id,
@@ -31,7 +35,10 @@ class DownloadRecord {
     this.isVideo = false,
     this.thumbnailUrl,
     this.filename,
-  });
+    this.currentProgress = 0,
+    this.currentMessage = '',
+    DateTime? lastUpdated,
+  }) : lastUpdated = lastUpdated ?? DateTime.now();
 
   // 创建批量下载记录
   factory DownloadRecord.fromBatchDownload({
@@ -42,6 +49,7 @@ class DownloadRecord {
     required int successCount,
     required int failedCount,
     required int skippedCount,
+    bool isComplete = true,
   }) {
     return DownloadRecord(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -53,9 +61,34 @@ class DownloadRecord {
       successCount: successCount,
       failedCount: failedCount,
       skippedCount: skippedCount,
-      isComplete: true,
+      isComplete: isComplete,
       downloadTime: DateTime.now(),
       thumbnailUrl: album.coverUrl,
+    );
+  }
+
+  // 新增：创建进行中的下载记录
+  factory DownloadRecord.inProgress({
+    required Album album,
+    required String targetUin,
+    required String savePath,
+    required int totalCount,
+  }) {
+    return DownloadRecord(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      albumId: album.id,
+      albumName: album.name,
+      targetUin: targetUin,
+      savePath: savePath,
+      totalCount: totalCount,
+      successCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      isComplete: false,
+      downloadTime: DateTime.now(),
+      thumbnailUrl: album.coverUrl,
+      currentProgress: 0,
+      currentMessage: '准备下载...',
     );
   }
 
@@ -104,6 +137,9 @@ class DownloadRecord {
       isVideo: json['isVideo'] ?? false,
       thumbnailUrl: json['thumbnailUrl'],
       filename: json['filename'],
+      currentProgress: json['currentProgress'] ?? 0,
+      currentMessage: json['currentMessage'] ?? '',
+      lastUpdated: json['lastUpdated'] != null ? DateTime.parse(json['lastUpdated']) : DateTime.now(),
     );
   }
 
@@ -124,7 +160,41 @@ class DownloadRecord {
       'isVideo': isVideo,
       'thumbnailUrl': thumbnailUrl,
       'filename': filename,
+      'currentProgress': currentProgress,
+      'currentMessage': currentMessage,
+      'lastUpdated': lastUpdated.toIso8601String(),
     };
+  }
+
+  // 更新记录（创建一个新的实例）
+  DownloadRecord copyWith({
+    int? successCount,
+    int? failedCount,
+    int? skippedCount,
+    bool? isComplete,
+    int? currentProgress,
+    String? currentMessage,
+    double? progressPercent,
+  }) {
+    return DownloadRecord(
+      id: id,
+      albumId: albumId,
+      albumName: albumName,
+      targetUin: targetUin,
+      savePath: savePath,
+      totalCount: totalCount,
+      successCount: successCount ?? this.successCount,
+      failedCount: failedCount ?? this.failedCount,
+      skippedCount: skippedCount ?? this.skippedCount,
+      isComplete: isComplete ?? this.isComplete,
+      downloadTime: downloadTime,
+      isVideo: isVideo,
+      thumbnailUrl: thumbnailUrl,
+      filename: filename,
+      currentProgress: currentProgress ?? this.currentProgress,
+      currentMessage: currentMessage ?? this.currentMessage,
+      lastUpdated: DateTime.now(),
+    );
   }
 
   // 格式化下载时间
@@ -145,5 +215,11 @@ class DownloadRecord {
     } else {
       return '下载中';
     }
+  }
+
+  // 获取下载进度百分比
+  double get progressPercentage {
+    if (totalCount == 0) return 0.0;
+    return currentProgress / totalCount;
   }
 } 

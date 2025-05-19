@@ -50,6 +50,12 @@ class DownloadRecordService {
     return _records;
   }
 
+  // 获取正在进行中的下载记录
+  Future<List<DownloadRecord>> getActiveDownloads() async {
+    await initialize();
+    return _records.where((record) => !record.isComplete).toList();
+  }
+
   // 添加下载记录
   Future<void> addRecord(DownloadRecord record) async {
     await initialize();
@@ -61,6 +67,55 @@ class DownloadRecordService {
     
     _records.insert(0, record); // 添加到列表开头
     await _saveRecords();
+  }
+
+  // 更新下载记录
+  Future<void> updateRecord(DownloadRecord record) async {
+    await initialize();
+    
+    final index = _records.indexWhere((r) => r.id == record.id);
+    if (index != -1) {
+      _records[index] = record;
+      await _saveRecords();
+    }
+  }
+
+  // 更新下载进度
+  Future<void> updateDownloadProgress(String recordId, int current, int total, String message) async {
+    await initialize();
+    
+    final index = _records.indexWhere((r) => r.id == recordId);
+    if (index != -1) {
+      final record = _records[index];
+      _records[index] = record.copyWith(
+        currentProgress: current,
+        currentMessage: message,
+      );
+      await _saveRecords();
+    }
+  }
+
+  // 更新下载结果
+  Future<void> completeDownload(String recordId, {
+    required int successCount,
+    required int failedCount,
+    required int skippedCount,
+  }) async {
+    await initialize();
+    
+    final index = _records.indexWhere((r) => r.id == recordId);
+    if (index != -1) {
+      final record = _records[index];
+      _records[index] = record.copyWith(
+        isComplete: true,
+        successCount: successCount,
+        failedCount: failedCount,
+        skippedCount: skippedCount,
+        currentMessage: '下载完成',
+        currentProgress: record.totalCount,
+      );
+      await _saveRecords();
+    }
   }
 
   // 删除下载记录

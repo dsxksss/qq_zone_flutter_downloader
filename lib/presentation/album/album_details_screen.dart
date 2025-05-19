@@ -13,8 +13,8 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:qq_zone_flutter_downloader/core/models/download_record.dart';
 import 'package:qq_zone_flutter_downloader/core/providers/qzone_image_provider.dart';
+import 'package:qq_zone_flutter_downloader/presentation/download/download_records_screen.dart';
 
 // 获取保存照片的目录
 Future<String> _getPhotoSaveDirectory() async {
@@ -455,76 +455,56 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
       // 获取保存路径
       final savePath = await _getPhotoSaveDirectory();
 
-      // 开始下载
-      final qzoneService = ref.read(qZoneServiceProvider);
-      final result = await qzoneService.downloadAlbum(
+      // 使用下载管理器开始下载
+      final downloadManager = ref.read(downloadManagerProvider.notifier);
+      await downloadManager.downloadAlbum(
         album: widget.album,
         savePath: savePath,
         targetUin: widget.targetUin,
         skipExisting: true,
-        onProgress: (current, total, message) {
-          setState(() {
-            _downloadProgress = current / total;
-            _downloadMessage = message;
-          });
-        },
-        onItemComplete: (result) {
-          // 可以在这里处理每个文件的下载结果
-          if (kDebugMode) {
-            print(
-                "[AlbumDetails] 文件下载完成: ${result['filename']}, 状态: ${result['status']}");
-          }
-        },
       );
 
-      // 保存下载记录
-      if (result['success'] > 0) {
-        final downloadRecordService = ref.read(downloadRecordServiceProvider);
-        await downloadRecordService.addRecord(
-          DownloadRecord.fromBatchDownload(
-            album: widget.album,
-            targetUin: widget.targetUin ?? qzoneService.loggedInUin ?? '',
-            savePath: '$savePath/${widget.album.name}',
-            totalCount: result['total'],
-            successCount: result['success'],
-            failedCount: result['failed'],
-            skippedCount: result['skipped'],
-          ),
-        );
-      }
-
-      // 显示下载完成对话框
       if (mounted) {
-        showDialog(
-          context: context,
-          builder: (context) => FDialog(
-            title: const Text('下载完成'),
-            body: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('相册: ${widget.album.name}'),
-                Text('相册中照片总数: ${widget.album.photoCount}'),
-                Text('成功获取照片列表: ${result['total']}'),
-                Text('成功下载: ${result['success']}'),
-                Text('失败: ${result['failed']}'),
-                Text('跳过(已存在): ${result['skipped']}'),
-                const SizedBox(height: 10),
-                Text('保存位置: $savePath/${widget.album.name}'),
-              ],
+        setState(() {
+          _isDownloading = false;
+          _downloadProgress = 1.0;
+          _downloadMessage = '下载已在后台开始，可在下载记录中查看进度';
+        });
+
+        // 显示消息并自动隐藏进度条
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已开始下载"${widget.album.name}"，可在下载记录中查看进度'),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: '查看',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const DownloadRecordsScreen(),
+                  ),
+                );
+              },
             ),
-            actions: [
-              FButton(
-                style: FButtonStyle.outline,
-                onPress: () => Navigator.of(context).pop(),
-                child: const Text('确定'),
-              ),
-            ],
           ),
         );
+        
+        // 2秒后自动隐藏进度条
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) {
+            setState(() {
+              _isDownloading = false;
+            });
+          }
+        });
       }
     } catch (e) {
       if (mounted) {
+        setState(() {
+          _isDownloading = false;
+        });
+        
         showDialog(
           context: context,
           builder: (context) => FDialog(
@@ -539,12 +519,6 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
             ],
           ),
         );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isDownloading = false;
-        });
       }
     }
   }
@@ -586,6 +560,10 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(8.0),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -598,22 +576,33 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                LinearProgressIndicator(
-                                  value: _downloadProgress,
-                                  backgroundColor: Colors.grey[200],
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.blue),
-                                ),
+                                // 使用不确定的进度条显示状态
+                                _downloadProgress <= 0 || _downloadProgress >= 1
+                                  ? LinearProgressIndicator(
+                                      backgroundColor: Colors.grey[200],
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                          Colors.blue),
+                                    )
+                                  : LinearProgressIndicator(
+                                      value: _downloadProgress,
+                                      backgroundColor: Colors.grey[200],
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                          Colors.blue),
+                                    ),
                                 const SizedBox(height: 4),
                                 Text(
                                   _downloadMessage,
                                   style: const TextStyle(fontSize: 12),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 2,
                                 ),
                               ],
                             ),
                           ),
                           const SizedBox(width: 8),
                           Text(
+                            _downloadProgress <= 0 ? '准备中' :
+                            _downloadProgress >= 1 ? '完成' :
                             '${(_downloadProgress * 100).toStringAsFixed(1)}%',
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,

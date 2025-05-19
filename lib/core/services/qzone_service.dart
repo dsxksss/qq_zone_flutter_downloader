@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert'; // Import for jsonDecode
 import 'dart:io'; // For HttpClient
+import 'dart:math'; // For min function
 import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart'; // For kDebugMode
 import 'package:qq_zone_flutter_downloader/core/constants.dart';
@@ -549,7 +550,7 @@ class QZoneService {
         print("[QZoneService DEBUG] 开始获取相册列表 (主API)");
         print("[QZoneService DEBUG] 请求参数: targetUin=$targetUin, loggedInUin=$_loggedInUin, gTk=$_gTk");
       }
-      
+
       // 获取完整Cookie
       final cookieString = await _getFullCookieString('https://user.qzone.qq.com/');
 
@@ -630,38 +631,38 @@ class QZoneService {
         }
         
         try {
-          final jsonData = jsonDecode(responseData);
-          if (jsonData['code'] == 0) {
-            final List<Album> albums = [];
-            final data = jsonData['data']?['albumList']; // 安全访问
-            
-            if (kDebugMode) {
-              print("[QZoneService DEBUG] 解析到的相册数据: $data");
-            }
-            
-            if (data != null && data is List) {
-              for (var item in data) {
-                if (kDebugMode) {
-                  print("[QZoneService DEBUG] 正在处理相册: ${item['name']}");
-                }
-                
-                albums.add(Album.fromJson(item)); // 使用fromJson构造函数
+        final jsonData = jsonDecode(responseData);
+        if (jsonData['code'] == 0) {
+          final List<Album> albums = [];
+          final data = jsonData['data']?['albumList']; // 安全访问
+          
+          if (kDebugMode) {
+            print("[QZoneService DEBUG] 解析到的相册数据: $data");
+          }
+          
+          if (data != null && data is List) {
+            for (var item in data) {
+              if (kDebugMode) {
+                print("[QZoneService DEBUG] 正在处理相册: ${item['name']}");
               }
               
-              if (kDebugMode) {
-                print("[QZoneService DEBUG] 成功解析相册数量: ${albums.length}");
-              }
-              return albums;
-            } else {
-               if (kDebugMode) {
-                  print("[QZoneService WARN] 主API返回成功，但albumList为空或格式不正确: $data");
-               }
+              albums.add(Album.fromJson(item)); // 使用fromJson构造函数
             }
-          } else {
+            
             if (kDebugMode) {
-              print("[QZoneService ERROR] 主API返回错误码: ${jsonData['code']}, 消息: ${jsonData['message']}");
+              print("[QZoneService DEBUG] 成功解析相册数量: ${albums.length}");
             }
-            // 不再立即抛出，而是尝试备用API
+            return albums;
+          } else {
+             if (kDebugMode) {
+                print("[QZoneService WARN] 主API返回成功，但albumList为空或格式不正确: $data");
+             }
+          }
+        } else {
+          if (kDebugMode) {
+            print("[QZoneService ERROR] 主API返回错误码: ${jsonData['code']}, 消息: ${jsonData['message']}");
+          }
+          // 不再立即抛出，而是尝试备用API
           }
         } catch (e) {
           if (kDebugMode) {
@@ -744,33 +745,33 @@ class QZoneService {
         }
 
         try {
-          final jsonData = jsonDecode(backupResponseData);
-          if (jsonData['code'] == 0) {
-            final List<Album> albums = [];
-            // v2 的数据结构可能是 data.album，而不是 data.albumList
-            final data = jsonData['data']?['album'] ?? jsonData['data']?['albumList']; 
-            
+        final jsonData = jsonDecode(backupResponseData);
+        if (jsonData['code'] == 0) {
+          final List<Album> albums = [];
+          // v2 的数据结构可能是 data.album，而不是 data.albumList
+          final data = jsonData['data']?['album'] ?? jsonData['data']?['albumList']; 
+          
+          if (kDebugMode) {
+            print("[QZoneService DEBUG] 备用API解析到的相册数据: $data");
+          }
+          
+          if (data != null && data is List) {
+            for (var item in data) {
+              albums.add(Album.fromJson(item)); // 使用fromJson构造函数
+            }
             if (kDebugMode) {
-              print("[QZoneService DEBUG] 备用API解析到的相册数据: $data");
+              print("[QZoneService DEBUG] 备用API成功解析相册数量: ${albums.length}");
             }
-            
-            if (data != null && data is List) {
-              for (var item in data) {
-                albums.add(Album.fromJson(item)); // 使用fromJson构造函数
-              }
-              if (kDebugMode) {
-                print("[QZoneService DEBUG] 备用API成功解析相册数量: ${albums.length}");
-              }
-              return albums;
-            } else {
-              if (kDebugMode) {
-                  print("[QZoneService WARN] 备用API返回成功，但albumList/album为空或格式不正确: $data");
-              }
-            }
+            return albums;
           } else {
             if (kDebugMode) {
-              print("[QZoneService ERROR] 备用API返回错误码: ${jsonData['code']}, 消息: ${jsonData['message']}");
-            }
+                print("[QZoneService WARN] 备用API返回成功，但albumList/album为空或格式不正确: $data");
+             }
+          }
+        } else {
+          if (kDebugMode) {
+            print("[QZoneService ERROR] 备用API返回错误码: ${jsonData['code']}, 消息: ${jsonData['message']}");
+          }
           }
         } catch (e) {
           if (kDebugMode) {
@@ -1033,7 +1034,7 @@ class QZoneService {
             }
             // 继续处理，尝试从data中提取照片信息
           } else {
-            throw QZoneApiException("获取照片列表失败. API错误: ${jsonData['message']} (code: ${jsonData['code']})");
+          throw QZoneApiException("获取照片列表失败. API错误: ${jsonData['message']} (code: ${jsonData['code']})");
           }
         }
 
@@ -1256,6 +1257,7 @@ class QZoneService {
       final headers = {
         'User-Agent': QZoneApiConstants.userAgent,
         'Referer': 'https://user.qzone.qq.com/',
+        'Cookie': await _getFullCookieString('https://user.qzone.qq.com/'),
       };
       
       // 对于视频，添加额外的请求头
@@ -1268,16 +1270,128 @@ class QZoneService {
         headers['Sec-Fetch-Site'] = 'cross-site';
       }
       
+      if (kDebugMode) {
+        print("[QZoneService] 开始下载文件: $url");
+        print("[QZoneService] 保存到: $filePath");
+        print("[QZoneService] 是否视频: $isVideo");
+      }
+      
+      // 视频URL清理 - 确保正确的视频URL
+      if (isVideo && url.contains('?')) {
+        // 有些视频URL带有多余的查询参数，尝试清理
+        final uri = Uri.parse(url);
+        if (uri.path.endsWith('.mp4') || uri.path.endsWith('.mov')) {
+          // 尝试使用纯路径，去掉查询参数
+          url = '${uri.scheme}://${uri.host}${uri.path}';
+          if (kDebugMode) {
+            print("[QZoneService] 清理后的视频URL: $url");
+          }
+        }
+      }
+      
       // 发起下载请求
+      final response = await _dio.get(
+        url,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: headers,
+          followRedirects: true,
+          validateStatus: (status) {
+            return status != null && status < 500;
+          }
+        ),
+        onReceiveProgress: (received, total) {
+          if (kDebugMode && total > 0 && received % (total ~/ 10) == 0) {
+            if (kDebugMode) {
+              print("[QZoneService] 下载进度: ${(received / total * 100).toStringAsFixed(1)}% ($received/$total)");
+            }
+          }
+          if (onProgress != null) {
+            onProgress(received, total);
+          }
+        },
+      );
+      
+      if (response.statusCode != 200 && response.statusCode != 206) {
+        throw QZoneApiException('下载失败：服务器响应状态码 ${response.statusCode}');
+      }
+      
+      // 检查是否获取到了正确的内容
+      if (isVideo) {
+        // 检查Content-Type是否为视频类型
+        final contentType = response.headers.value('content-type');
+        if (kDebugMode) {
+          print("[QZoneService] 视频下载响应Content-Type: $contentType");
+          print("[QZoneService] 响应大小: ${response.data.length} 字节");
+        }
+        
+        // QQ空间的视频响应类型可能不规范，放宽检查条件
+        bool isLikelyVideo = false;
+        
+        // 检查文件头部特征
+        if (response.data is List<int> && response.data.length > 16) {
+          final bytes = response.data as List<int>;
+          final fileSignature = bytes.sublist(0, min(16, bytes.length));
+          
+          // MP4文件头特征：以'ftyp'开头或包含特定字节序列
+          if (bytes.length > 8) {
+            if (bytes[4] == 0x66 && bytes[5] == 0x74 && bytes[6] == 0x79 && bytes[7] == 0x70) { // 'ftyp'
+              isLikelyVideo = true;
+              if (kDebugMode) {
+                print("[QZoneService] 检测到MP4文件特征(ftyp)");
+              }
+            }
+          }
+        }
+        
+        // 通过内容类型判断
+        if (contentType != null && 
+           (contentType.contains('video') || 
+            contentType.contains('octet-stream') || 
+            contentType.contains('mp4') ||
+            contentType.contains('binary'))) {
+          isLikelyVideo = true;
+        }
+        
+        // 通过URL判断
+        if (url.toLowerCase().endsWith('.mp4') || url.toLowerCase().contains('/video/')) {
+          isLikelyVideo = true;
+        }
+        
+        // 通过文件大小初步判断
+        if (response.data.length > 500 * 1024) { // 大于500KB可能是视频
+          isLikelyVideo = true;
+        }
+        
+        if (!isLikelyVideo) {
+          if (kDebugMode) {
+            print("[QZoneService WARNING] 可能不是视频文件: Content-Type=$contentType, 大小=${response.data.length}字节");
+          }
+          throw QZoneApiException("下载的不是视频文件，可能是缩略图或空文件。尝试检查视频URL。");
+        }
+      }
+      
+      if (kDebugMode) {
+        print("[QZoneService] 下载完成，大小: ${response.data.length} 字节");
+        final contentType = response.headers.value('content-type');
+        print("[QZoneService] Content-Type: $contentType");
+      }
+      
+      // 写入文件
+      final file = File(filePath);
+      await file.writeAsBytes(response.data, flush: true);
       
       // 检查文件是否存在
-      final file = File(filePath);
       if (!await file.exists()) {
         throw QZoneApiException("下载失败：文件未创建");
       }
       
       // 获取文件大小
       final fileSize = await file.length();
+      
+      if (kDebugMode) {
+        print("[QZoneService] 文件已保存: $filePath ($fileSize 字节)");
+      }
       
       // 返回下载结果
       return {
@@ -1289,6 +1403,10 @@ class QZoneService {
     } on DioException catch (e) {
       if (kDebugMode) {
         print("[QZoneService ERROR] 下载文件失败 DioException: ${e.message}");
+        if (e.response != null) {
+          print("[QZoneService ERROR] 响应状态码: ${e.response?.statusCode}");
+          print("[QZoneService ERROR] 响应头: ${e.response?.headers}");
+        }
       }
       throw QZoneApiException('下载文件失败: ${e.message}', underlyingError: e);
     } catch (e) {
@@ -1314,6 +1432,10 @@ class QZoneService {
     final String gtk = _gTk!;
     
     try {
+      if (kDebugMode) {
+        print("[QZoneService] 开始获取视频真实URL: photoId=$photoId, albumId=$albumId");
+      }
+      
       // 构建请求参数
       final Map<String, dynamic> params = {
         'g_tk': gtk,
@@ -1339,7 +1461,14 @@ class QZoneService {
 
       Response response = await _dio.get(
         url,
-        options: Options(responseType: ResponseType.plain),
+        options: Options(
+          responseType: ResponseType.plain,
+          headers: {
+            'User-Agent': QZoneApiConstants.userAgent,
+            'Referer': 'https://user.qzone.qq.com/',
+            'Cookie': await _getFullCookieString('https://user.qzone.qq.com/'),
+          }
+        ),
       );
 
       String responseBody = response.data.toString().trim();
@@ -1358,21 +1487,122 @@ class QZoneService {
           final int picPosInPage = data['picPosInPage'] ?? 0;
           final photos = data['photos'];
           
+          if (kDebugMode) {
+            print("[QZoneService DEBUG] 找到视频信息: picPosInPage=$picPosInPage, 总共照片数=${photos.length}");
+          }
+          
+          String? videoUrl;
+          
+          // 首先尝试在picPosInPage位置查找视频
           if (picPosInPage < photos.length) {
             final photo = photos[picPosInPage];
             
-            if (photo['video_info'] != null) {
-              final videoInfo = photo['video_info'];
-              if (videoInfo['status'] == 2) { // 状态为2表示可以正常播放
-                String? videoUrl = videoInfo['download_url'] ?? videoInfo['video_url'];
-                return videoUrl;
+            // 详细记录视频信息以便调试
+            if (kDebugMode) {
+              print("[QZoneService DEBUG] 视频照片信息(精简): ${photo['is_video']}");
+              if (photo['video_info'] != null) {
+                print("[QZoneService DEBUG] video_info: ${photo['video_info']}");
+              }
+              
+              // 检查可能的URL字段
+              final possibleUrlFields = ['raw_url', 'video_url', 'url', 'origin_url', 'download_url'];
+              for (final field in possibleUrlFields) {
+                if (photo[field] != null) {
+                  print("[QZoneService DEBUG] $field: ${photo[field]}");
+                }
               }
             }
+            
+            // 1. 优先使用video_info内的URL
+            if (photo['video_info'] != null) {
+              final videoInfo = photo['video_info'];
+              // 尝试多种可能的URL字段
+              videoUrl = videoInfo['download_url'] ?? videoInfo['video_url'] ?? videoInfo['url'] ?? videoInfo['raw_url'];
+            }
+            
+            // 2. 尝试videoInfo字段（旧版API）
+            if (videoUrl == null && photo['videoInfo'] != null) {
+              final videoInfo = photo['videoInfo'];
+              videoUrl = videoInfo['url'] ?? videoInfo['download_url'] ?? videoInfo['video_url'] ?? videoInfo['raw_url'];
+            }
+            
+            // 3. 尝试直接使用其他字段
+            if (videoUrl == null) {
+              // 按照优先级尝试各个字段
+              videoUrl = photo['video_url'] ?? photo['download_url'];
+            }
+            
+            // 4. 最后尝试raw_url或url字段，如果它们看起来像视频
+            if (videoUrl == null) {
+              final String? rawUrl = photo['raw_url'];
+              if (rawUrl != null && (rawUrl.toLowerCase().endsWith('.mp4') || rawUrl.contains('video'))) {
+                videoUrl = rawUrl;
+              }
+              
+              if (videoUrl == null) {
+                final String? normalUrl = photo['url'];
+                if (normalUrl != null && (normalUrl.toLowerCase().endsWith('.mp4') || normalUrl.contains('video'))) {
+                  videoUrl = normalUrl;
+                }
+              }
+            }
+          }
+          
+          // 如果在指定位置没找到，尝试遍历所有照片查找
+          if (videoUrl == null) {
+            for (final photo in photos) {
+              if (photo['is_video'] == 1 || photo['videoInfo'] != null || photo['video_info'] != null) {
+                if (kDebugMode) {
+                  print("[QZoneService DEBUG] 在全部照片中找到视频");
+                }
+                
+                if (photo['video_info'] != null) {
+                  final videoInfo = photo['video_info'];
+                  videoUrl = videoInfo['download_url'] ?? videoInfo['video_url'] ?? videoInfo['url'];
+                } else if (photo['videoInfo'] != null) {
+                  final videoInfo = photo['videoInfo'];
+                  videoUrl = videoInfo['url'] ?? videoInfo['download_url'];
+                } else if (photo['video_url'] != null) {
+                  videoUrl = photo['video_url'];
+                } else if (photo['raw_url'] != null && photo['raw_url'].toString().contains('.mp4')) {
+                  videoUrl = photo['raw_url'];
+                }
+                
+                if (videoUrl != null) break;
+              }
+            }
+          }
+          
+          // 处理和验证找到的URL
+          if (videoUrl != null && videoUrl.isNotEmpty) {
+            if (kDebugMode) {
+              print("[QZoneService DEBUG] 找到视频URL: $videoUrl");
+            }
+            
+            // 清理URL中的多余参数
+            if (videoUrl.contains('?') && videoUrl.contains('.mp4')) {
+              final uri = Uri.parse(videoUrl);
+              if (uri.path.endsWith('.mp4')) {
+                // 只保留基本URL，去掉查询参数
+                videoUrl = '${uri.scheme}://${uri.host}${uri.path}';
+                if (kDebugMode) {
+                  print("[QZoneService DEBUG] 清理后的视频URL: $videoUrl");
+                }
+              }
+            }
+            
+            return videoUrl;
           }
         }
       }
       
-      return null;
+      // 尝试备用方法构造视频URL
+      final possibleUrl = 'https://photovideo.photo.qq.com/${photoId}.mp4';
+      if (kDebugMode) {
+        print("[QZoneService DEBUG] 尝试备用URL构造方法: $possibleUrl");
+      }
+      return possibleUrl;
+      
     } catch (e) {
       if (kDebugMode) {
         print("[QZoneService ERROR] 获取视频真实URL失败: $e");
@@ -1397,48 +1627,113 @@ class QZoneService {
     final String albumPath = '$savePath/${album.name}';
     await Directory(albumPath).create(recursive: true);
 
-    List<Photo> photos;
+    // 获取相册中的所有照片（包括分页）
+    if (onProgress != null) {
+      onProgress(0, album.photoCount, "正在获取照片列表...");
+    }
+    
+    List<Photo> allPhotos = [];
+    int pageStart = 0;
+    const int pageSize = 30;
+    bool hasMore = true;
+    
     try {
-      // 尝试使用正常API获取照片列表
-      photos = await getPhotoList(
-        albumId: album.id,
-        targetUin: targetUin,
-        retryCount: 3, // 增加重试次数
-      );
-    } catch (e) {
-      if (kDebugMode) {
-        print("[QZoneService] 使用普通API获取照片列表失败，尝试备用API: $e");
+    // 分页获取所有照片
+    while (hasMore) {
+      if (onProgress != null) {
+          onProgress(allPhotos.length, album.photoCount, "正在获取照片列表 (${allPhotos.length}/${album.photoCount})...");
       }
       
-      // 如果正常API失败，尝试使用备用API获取照片列表
-      try {
-        photos = await _getPhotoListBackup(
-          albumId: album.id,
-          targetUin: targetUin,
-        );
-      } catch (e) {
-        if (kDebugMode) {
-          print("[QZoneService] 备用API也失败: $e");
+        List<Photo> pagePhotos;
+        try {
+          // 尝试使用主API获取照片
+          pagePhotos = await getPhotoList(
+        albumId: album.id, 
+        targetUin: targetUin,
+            retryCount: 2,
+        pageStart: pageStart
+      );
+        } catch (e) {
+          if (kDebugMode) {
+            print("[QZoneService] 主API获取照片列表失败，尝试备用API: $e");
+          }
+          
+          // 如果主API失败，尝试使用备用API
+          try {
+            pagePhotos = await _getPhotoListBackup(
+              albumId: album.id,
+              targetUin: targetUin
+            );
+            // 备用API不支持分页，所以获取后直接设置hasMore为false
+            hasMore = false;
+          } catch (backupError) {
+            if (kDebugMode) {
+              print("[QZoneService] 备用API也失败: $backupError");
+            }
+            throw QZoneApiException('无法获取相册照片: $e');
+          }
         }
-        throw QZoneApiException('无法获取相册照片: $e');
+      
+      if (pagePhotos.isEmpty) {
+        // 如果返回空列表，表示没有更多照片
+        hasMore = false;
+      } else {
+          // 添加新照片到总列表，过滤重复项
+        final newPhotos = pagePhotos.where((newPhoto) => 
+            !allPhotos.any((existingPhoto) => existingPhoto.id == newPhoto.id)
+        ).toList();
+        
+        if (kDebugMode) {
+            print("[QZoneService] 已获取照片: ${allPhotos.length}/${album.photoCount}, 本页新增: ${newPhotos.length}");
+        }
+          
+          allPhotos.addAll(newPhotos);
+        
+        // 更新分页参数
+        pageStart += pageSize;
+        
+          // 如果本页获取的新照片数量少于页大小，或者已经获取的总数达到或超过相册声明的照片数，则结束
+          if (newPhotos.length < pageSize || allPhotos.length >= album.photoCount) {
+            hasMore = false;
+          }
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print("[QZoneService] 获取完整照片列表失败: $e");
+      }
+      
+      // 如果已经获取了一些照片，则继续下载这些照片
+      if (allPhotos.isEmpty) {
+        throw QZoneApiException('获取相册照片列表失败: $e');
+      }
+      
+      if (onProgress != null) {
+        onProgress(0, allPhotos.length, "获取完整列表失败，将下载已获取的${allPhotos.length}张照片");
       }
     }
 
-    if (photos.isEmpty) {
+    if (allPhotos.isEmpty) {
       throw QZoneApiException('相册内未找到任何照片');
     }
 
-    int total = photos.length;
+    int total = allPhotos.length;
     int success = 0;
     int failed = 0;
     int skipped = 0;
-
-    for (int i = 0; i < photos.length; i++) {
-      final photo = photos[i];
+    
+    for (int i = 0; i < allPhotos.length; i++) {
+      final photo = allPhotos[i];
       final String fileName = _sanitizeFileName(photo.name);
       String fileExt = '';
       String message = '${i + 1}/$total: $fileName';
 
+      // 更新总进度
+      if (onProgress != null) {
+        onProgress(i, total, '$message - 准备下载...');
+      }
+
+      // 确定文件类型和扩展名
       if (photo.isVideo) {
         fileExt = '.mp4';
         message = '$message (视频)';
@@ -1468,53 +1763,182 @@ class QZoneService {
         continue;
       }
 
-      try {
+            try {
+        // 获取下载URL
         String? url;
 
-        if (photo.isVideo && photo.videoUrl != null) {
-          url = photo.videoUrl;
+        // 对于视频，尝试获取真实视频URL
+        if (photo.isVideo) {
+          try {
+            // 先检查是否有videoUrl
+            if (photo.videoUrl != null && photo.videoUrl!.isNotEmpty) {
+              url = photo.videoUrl;
+              if (kDebugMode) {
+                print("[QZoneService] 使用Photo对象中的videoUrl: $url");
+              }
+            } else {
+              // 尝试获取真实视频URL
+              final videoUrl = await _tryAlternativeVideoURL(
+                photo,
+                album.id,
+                targetUin,
+              );
+              
+              if (videoUrl != null && videoUrl.isNotEmpty) {
+                url = videoUrl;
+                if (kDebugMode) {
+                  print("[QZoneService] 成功获取视频真实URL: $videoUrl");
+                }
+              } else if (photo.url != null) {
+                // 如果没有获取到视频URL，但有photo.url，可能是缩略图
+                url = photo.url;
+          if (kDebugMode) {
+                  print("[QZoneService] 未获取到视频URL，尝试使用photo.url: ${photo.url}");
+                }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+              print("[QZoneService] 获取视频URL失败: $e，将尝试使用photo.url");
+            }
+            
+            // 如果获取视频URL失败，尝试使用photo.url（可能是缩略图）
+            if (photo.url != null) {
+              url = photo.url;
+            }
+          }
         } else if (photo.url != null) {
+          // 照片使用普通URL
           url = photo.url;
-        } else {
+        }
+
+        // 如果没有URL，抛出异常
+        if (url == null || url.isEmpty) {
           throw Exception('没有找到下载链接');
         }
 
-        if (onProgress != null) {
+      if (onProgress != null) {
           onProgress(i + 1, total, '$message - 正在下载...');
         }
 
-        final response = await _dio.get(
-          url!,
-          options: Options(
-            responseType: ResponseType.bytes,
-            followRedirects: true,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-              'Referer': 'https://user.qzone.qq.com/',
-              'Cookie': await _getFullCookieString('https://user.qzone.qq.com/'),
-              'Accept': '*/*',
-              'Accept-Encoding': 'gzip, deflate, br, zstd',
-              'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-              'Cache-Control': 'no-cache',
-              'Pragma': 'no-cache',
-            },
-          ),
-        );
-
-        await file.writeAsBytes(response.data);
-        success++;
-
-        if (onProgress != null) {
-          onProgress(i + 1, total, '$message - 下载完成');
+        // 下载文件
+        try {
+          final result = await downloadFile(
+            url: url,
+            savePath: albumPath,
+            filename: '$fileName$fileExt',
+            isVideo: photo.isVideo,
+            onProgress: (received, total) {
+              if (onProgress != null && total > 0) {
+                final percentage = received / total;
+                final progressMessage = '$message - 下载中 ${(percentage * 100).toStringAsFixed(1)}%';
+                onProgress(i + 1, allPhotos.length, progressMessage);
+              }
+            }
+          );
+          
+          success++;
+          
+          if (onProgress != null) {
+            onProgress(i + 1, total, '$message - 下载完成');
+          }
+          
+          if (onItemComplete != null) {
+            onItemComplete({
+              'status': 'success',
+              'message': '下载成功',
+              'filename': '$fileName$fileExt',
+              'path': result['path'],
+              'photo': photo,
+              'size': result['size'],
+            });
+          }
+          
+          continue;
+        } catch (downloadError) {
+          if (kDebugMode) {
+            print("[QZoneService] 下载失败: $downloadError");
         }
+        
+          // 如果是视频并且下载失败，可能需要尝试其他URL
+        if (photo.isVideo) {
+            if (kDebugMode) {
+              print("[QZoneService] 视频下载失败，尝试其他方法获取视频URL");
+            }
+            
+            try {
+              // 再次尝试获取视频真实URL（使用不同接口）
+              final alternativeVideoUrl = await getVideoRealUrl(
+            photoId: photo.id,
+            albumId: album.id,
+            targetUin: targetUin,
+          );
+          
+              if (alternativeVideoUrl != null && alternativeVideoUrl != url) {
+                if (kDebugMode) {
+                  print("[QZoneService] 找到备用视频URL: $alternativeVideoUrl");
+                }
+                
+                if (onProgress != null) {
+                  onProgress(i + 1, total, '$message - 尝试备用URL下载...');
+                }
+                
+                final result = await downloadFile(
+                  url: alternativeVideoUrl,
+                  savePath: albumPath,
+                  filename: '$fileName$fileExt',
+                  isVideo: true,
+                  onProgress: (received, total) {
+                    if (onProgress != null && total > 0) {
+                      final percentage = received / total;
+                      final progressMessage = '$message - 备用URL下载中 ${(percentage * 100).toStringAsFixed(1)}%';
+                      onProgress(i + 1, allPhotos.length, progressMessage);
+                    }
+                  }
+                );
+                
+                success++;
+                
+                if (onProgress != null) {
+                  onProgress(i + 1, total, '$message - 备用URL下载完成');
+                }
+                
+          if (onItemComplete != null) {
+            onItemComplete({
+                    'status': 'success',
+                    'message': '使用备用URL下载成功',
+                    'filename': '$fileName$fileExt',
+                    'path': result['path'],
+              'photo': photo,
+                    'size': result['size'],
+            });
+          }
+                
+          continue;
+              }
+            } catch (e) {
+              if (kDebugMode) {
+                print("[QZoneService] 备用视频URL下载也失败: $e");
+              }
+            }
+          }
+          
+          // 如果所有尝试都失败，记录失败
+          failed++;
+          
+            if (onProgress != null) {
+            onProgress(i + 1, total, '$message - 下载失败: $downloadError');
+            }
+        
         if (onItemComplete != null) {
-          onItemComplete({
-            'status': 'success',
-            'message': '下载成功',
-            'filename': '$fileName$fileExt',
-            'path': filePath,
-            'photo': photo,
-          });
+            onItemComplete({
+              'status': 'failed',
+              'message': '下载失败: $downloadError',
+              'filename': '$fileName$fileExt',
+              'path': filePath,
+              'photo': photo,
+            });
+          }
         }
       } catch (e) {
         failed++;
@@ -1536,7 +1960,7 @@ class QZoneService {
         }
       }
     }
-
+    
     return {
       'total': total,
       'success': success,
@@ -1544,6 +1968,8 @@ class QZoneService {
       'skipped': skipped,
       'albumName': album.name,
       'albumPath': albumPath,
+      'fetchedPhotoCount': allPhotos.length,
+      'totalPhotoCount': album.photoCount,
     };
   }
   
@@ -1749,6 +2175,159 @@ class QZoneService {
     } catch (e) {
       if (kDebugMode) {
         print("[QZoneService ERROR] 获取照片失败: $e");
+      }
+      return null;
+    }
+  }
+
+  // 尝试通过备用方法获取视频URL
+  Future<String?> _tryAlternativeVideoURL(Photo photo, String albumId, String? targetUin) async {
+    try {
+      // 日志记录照片对象信息用于调试
+      if (kDebugMode) {
+        print("[QZoneService] 尝试获取视频真实URL");
+        print("[QZoneService] 照片ID: ${photo.id}");
+        print("[QZoneService] 照片URL: ${photo.url}");
+        print("[QZoneService] 视频URL (如果有): ${photo.videoUrl}");
+        print("[QZoneService] 是否视频: ${photo.isVideo}");
+      }
+    
+      // 方法1：尝试使用视频信息接口
+      final videoUrl = await getVideoRealUrl(
+        photoId: photo.id,
+        albumId: albumId,
+        targetUin: targetUin,
+      );
+      
+      if (videoUrl != null && videoUrl.isNotEmpty) {
+        // 验证URL是否包含视频域名或视频扩展名
+        if (videoUrl.contains('.mp4') || 
+            videoUrl.contains('video') || 
+            videoUrl.contains('photovideo.photo.qq.com')) {
+          if (kDebugMode) {
+            print("[QZoneService] 成功通过视频信息接口获取视频URL: $videoUrl");
+          }
+          return videoUrl;
+        } else {
+          if (kDebugMode) {
+            print("[QZoneService] 获取到的URL可能不是视频: $videoUrl");
+          }
+        }
+      }
+      
+      // 方法2：检查URL中的特殊参数
+      if (photo.url != null) {
+        final url = photo.url!;
+        // 检查是否包含QQ空间视频特定参数
+        if (url.contains('.mp4') || url.contains('photovideo.photo.qq.com')) {
+          if (kDebugMode) {
+            print("[QZoneService] 照片URL可能是视频: $url");
+          }
+          return url;
+        }
+        
+        // 方法3：尝试分析URL和重构视频URL
+        try {
+          if (url.contains('?')) {
+            // 提取参数
+            final uri = Uri.parse(url);
+            final params = uri.queryParameters;
+            
+            // 检查是否含有视频相关参数
+            if (params.containsKey('bo') || params.containsKey('rf')) {
+              // 尝试查找lloc或sloc作为视频ID
+              if (photo.id.isNotEmpty) {
+                // 构建可能的视频URL格式 (根据QQ空间API分析)
+                String possibleVideoUrl = 'https://photovideo.photo.qq.com/${photo.id}.f0.mp4';
+                if (kDebugMode) {
+                  print("[QZoneService] 尝试构建视频URL: $possibleVideoUrl");
+                }
+                
+                // 尝试验证URL
+                try {
+                  final headResponse = await _dio.head(
+                    possibleVideoUrl,
+                    options: Options(
+                      headers: {
+                        'User-Agent': QZoneApiConstants.userAgent,
+                        'Referer': 'https://user.qzone.qq.com/',
+                        'Range': 'bytes=0-0',
+                      },
+                    ),
+                  );
+                  
+                  // 检查响应内容类型
+                  final contentType = headResponse.headers.value('content-type');
+                  if (contentType != null && contentType.contains('video')) {
+                    if (kDebugMode) {
+                      print("[QZoneService] 成功验证视频URL: $possibleVideoUrl");
+                    }
+                    return possibleVideoUrl;
+                  }
+                } catch (e) {
+                  // 验证失败，继续尝试其他方法
+                  if (kDebugMode) {
+                    print("[QZoneService] 验证构建的视频URL失败: $e");
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) {
+          if (kDebugMode) {
+            print("[QZoneService] 分析URL失败: $e");
+          }
+        }
+      }
+      
+      // 方法4：检查照片对象中所有可能的URL字段
+      if (photo.url != null && photo.url!.isNotEmpty) {
+        // 检查URL是否是视频URL
+        try {
+          final response = await _dio.head(
+            photo.url!,
+            options: Options(
+              headers: {
+                'User-Agent': QZoneApiConstants.userAgent,
+                'Referer': 'https://user.qzone.qq.com/',
+                'Accept-Encoding': 'identity;q=1, *;q=0',
+                'Range': 'bytes=0-0',
+              },
+            ),
+          );
+          
+          final contentType = response.headers.value('content-type');
+          response.headers.value('content-length');
+          
+          // 检查内容类型和大小
+          if (contentType != null && contentType.contains('video')) {
+            if (kDebugMode) {
+              print("[QZoneService] 确认URL是视频: ${photo.url} (Content-Type: $contentType)");
+            }
+            return photo.url;
+          }
+          
+          // 检查响应头中是否包含视频相关信息
+          for (var entry in response.headers.map.entries) {
+            if (entry.key.toLowerCase().contains('video') || 
+                (entry.value.isNotEmpty && entry.value.first.contains('video'))) {
+              if (kDebugMode) {
+                print("[QZoneService] 在响应头中找到视频相关信息: ${entry.key}: ${entry.value}");
+              }
+              return photo.url;
+            }
+          }
+        } catch (e) {
+          if (kDebugMode) {
+            print("[QZoneService] 检查URL类型失败: $e");
+          }
+        }
+      }
+      
+      return null;
+    } catch (e) {
+      if (kDebugMode) {
+        print("[QZoneService] 尝试备用视频URL方法失败: $e");
       }
       return null;
     }

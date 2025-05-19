@@ -111,4 +111,51 @@ class NotificationService {
       payload: savePath,
     );
   }
+  
+  // 显示下载进度通知
+  Future<void> showDownloadProgress({
+    required int id,
+    required String title,
+    required String message,
+    required double progress,
+    required double maxProgress,
+  }) async {
+    if (!_isInitialized) {
+      await initialize();
+    }
+    
+    final AndroidNotificationDetails androidNotificationDetails = 
+        AndroidNotificationDetails(
+          'download_progress_channel',
+          '下载进度通知',
+          channelDescription: '显示QQ空间照片和视频下载进度的通知',
+          importance: Importance.low,
+          priority: Priority.low,
+          showProgress: true,
+          maxProgress: 100,
+          progress: (progress * 100).toInt(),
+          onlyAlertOnce: true,
+          ongoing: true,
+          autoCancel: false,
+        );
+        
+    const DarwinNotificationDetails iosNotificationDetails = 
+        DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: false,
+        );
+        
+    final NotificationDetails notificationDetails = NotificationDetails(
+      android: androidNotificationDetails,
+      iOS: iosNotificationDetails,
+    );
+    
+    await _flutterLocalNotificationsPlugin.show(
+      id,
+      title,
+      message,
+      notificationDetails,
+    );
+  }
 } 
