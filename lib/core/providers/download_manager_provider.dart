@@ -6,6 +6,18 @@ import 'package:qq_zone_flutter_downloader/core/services/notification_service.da
 import 'package:qq_zone_flutter_downloader/core/services/qzone_service.dart';
 import 'package:flutter/foundation.dart';
 
+// 自定义异常：相册已经下载过
+class AlbumAlreadyDownloadedException implements Exception {
+  final DownloadRecord existingRecord;
+
+  AlbumAlreadyDownloadedException(this.existingRecord);
+
+  @override
+  String toString() {
+    return '相册 "${existingRecord.albumName}" 已经下载过';
+  }
+}
+
 // 下载管理器状态
 class DownloadManagerState {
   final Map<String, DownloadRecord> activeDownloads; // 当前活跃的下载 (id -> record)
@@ -32,18 +44,37 @@ class DownloadManager extends StateNotifier<DownloadManagerState> {
       this._recordService, this._qzoneService, this._notificationService)
       : super(DownloadManagerState());
 
+  // 检查相册是否已经下载过
+  Future<DownloadRecord?> checkAlbumDownloaded(String albumId) async {
+    return await _recordService.hasAlbumBeenDownloaded(albumId);
+  }
+
   // 开始下载相册
   Future<void> downloadAlbum({
     required Album album,
     required String savePath,
     String? targetUin,
     bool skipExisting = true,
+    bool forceDownload = false, // 新增参数，是否强制下载（即使已经下载过）
   }) async {
+    // 检查是否正在下载
     if (state.activeDownloads.containsKey(album.id)) {
       if (kDebugMode) {
         print("[DownloadManager] 相册已在下载队列中: ${album.name}");
       }
       return;
+    }
+
+    // 如果不是强制下载，检查是否已经下载过
+    if (!forceDownload) {
+      final existingRecord = await _recordService.hasAlbumBeenDownloaded(album.id);
+      if (existingRecord != null) {
+        if (kDebugMode) {
+          print("[DownloadManager] 相册已经下载过: ${album.name}");
+        }
+        // 返回已存在的记录，由调用方决定是否继续下载
+        throw AlbumAlreadyDownloadedException(existingRecord);
+      }
     }
 
     // 创建进行中记录

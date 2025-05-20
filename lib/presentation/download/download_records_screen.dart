@@ -2,13 +2,16 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';  // 导入 Clipboard 和 ClipboardData
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:forui/forui.dart';
 import 'package:path/path.dart' as p;
 import 'package:qq_zone_flutter_downloader/core/models/download_record.dart';
 import 'package:qq_zone_flutter_downloader/core/providers/service_providers.dart';
-import 'package:qq_zone_flutter_downloader/presentation/download/file_viewer_screen.dart';
+import 'package:qq_zone_flutter_downloader/presentation/download/file_list_viewer_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:android_intent_plus/android_intent.dart';
 
 class DownloadRecordsScreen extends ConsumerStatefulWidget {
   const DownloadRecordsScreen({super.key});
@@ -29,18 +32,39 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadRecords();
+    _loadRecords().then((_) {
+      // 初始加载完成后，只有在有活跃下载时才启动定时器
+      _startTimerIfNeeded();
+    });
+  }
 
-    // 设置定时器，每3秒自动刷新一次下载进度和记录
-    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (mounted) {
-        // 无论是否有活跃下载都刷新，确保下载完成后记录也能更新
-        _loadRecords();
+  // 根据是否有活跃下载来启动或停止定时器
+  void _startTimerIfNeeded() {
+    if (_activeDownloads.isNotEmpty) {
+      // 有活跃下载，启动定时器（如果尚未启动）
+      if (_refreshTimer == null || !_refreshTimer!.isActive) {
+        _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+          if (mounted) {
+            _loadRecords();
+            if (kDebugMode) {
+              print("[DownloadRecords] 自动刷新下载记录");
+            }
+          }
+        });
         if (kDebugMode) {
-          print("[DownloadRecords] 自动刷新下载记录");
+          print("[DownloadRecords] 启动自动刷新定时器");
         }
       }
-    });
+    } else {
+      // 没有活跃下载，停止定时器
+      if (_refreshTimer != null && _refreshTimer!.isActive) {
+        _refreshTimer!.cancel();
+        _refreshTimer = null;
+        if (kDebugMode) {
+          print("[DownloadRecords] 停止自动刷新定时器");
+        }
+      }
+    }
   }
 
   @override
@@ -78,6 +102,9 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
             _isLoading = false;
           }
         });
+
+        // 根据活跃下载状态管理定时器
+        _startTimerIfNeeded();
       }
     } catch (e) {
       if (!isAutoRefresh && mounted) {
@@ -569,6 +596,21 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
           print("[DownloadRecords] 下载管理器状态变化，刷新活跃下载列表");
         }
         _loadRecords();
+
+        // 如果活跃下载数量从有到无或从无到有，需要管理定时器
+        if ((previous?.activeDownloads.isEmpty ?? true) && next.activeDownloads.isNotEmpty) {
+          // 从无到有，确保定时器启动
+          if (kDebugMode) {
+            print("[DownloadRecords] 检测到新的活跃下载，确保定时器启动");
+          }
+          _startTimerIfNeeded();
+        } else if ((previous?.activeDownloads.isNotEmpty ?? false) && next.activeDownloads.isEmpty) {
+          // 从有到无，停止定时器
+          if (kDebugMode) {
+            print("[DownloadRecords] 检测到活跃下载已全部完成，停止定时器");
+          }
+          _startTimerIfNeeded();
+        }
       }
     });
 
@@ -739,8 +781,152 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
         folderPath = '${record.savePath}/${record.albumName}';
       }
 
-      // 使用系统文件管理器打开文件夹
-      final result = await launchUrl(Uri.file(folderPath));
+      // 检查文件夹是否存在
+      final directory = Directory(folderPath);
+      if (!await directory.exists()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('文件夹不存在: $folderPath')),
+          );
+        }
+        return;
+      }
+
+      // 根据平台使用不同的打开方式
+      bool result;
+      if (Platform.isWindows) {
+        // Windows 平台使用 explorer.exe 打开文件夹
+        final process = await Process.run('explorer.exe', [folderPath]);
+        result = process.exitCode == 0;
+
+        if (kDebugMode) {
+          print("[OpenFolder] Windows 打开文件夹: $folderPath, 结果: $result");
+          if (process.exitCode != 0) {
+            print("[OpenFolder] 错误: ${process.stderr}");
+          }
+        }
+      } else if (Platform.isAndroid) {
+        // Android 平台使用原生 Intent API 打开文件夹
+        try {
+          final androidInfo = await DeviceInfoPlugin().androidInfo;
+          final sdkInt = androidInfo.version.sdkInt;
+
+          if (kDebugMode) {
+            print("[OpenFolder] Android SDK 版本: $sdkInt");
+            print("[OpenFolder] 尝试打开文件夹: $folderPath");
+          }
+
+          // 尝试方法1: 使用文件管理器直接打开文件夹
+          // 这种方法在大多数Android设备上应该能工作
+          String normalizedPath = folderPath;
+
+          // 确保路径格式正确
+          if (folderPath.startsWith('/storage/emulated/0/')) {
+            // 转换为更通用的路径格式
+            normalizedPath = folderPath.replaceFirst('/storage/emulated/0/', '/sdcard/');
+          }
+
+          if (kDebugMode) {
+            print("[OpenFolder] 规范化路径: $normalizedPath");
+          }
+
+          // 尝试使用文件管理器打开
+          final intent = AndroidIntent(
+            action: 'android.intent.action.VIEW',
+            data: 'file://$normalizedPath',
+            flags: <int>[0x10000000], // FLAG_ACTIVITY_NEW_TASK
+          );
+
+          await intent.launch();
+          result = true;
+
+          if (kDebugMode) {
+            print("[OpenFolder] 使用文件管理器打开文件夹: $normalizedPath");
+          }
+        } catch (e) {
+          // 如果第一种方法失败，尝试使用其他文件管理器
+          if (kDebugMode) {
+            print("[OpenFolder] 第一种方法失败: $e，尝试使用其他文件管理器");
+          }
+
+          try {
+            // 尝试方法2: 使用ES文件浏览器(如果已安装)
+            final esIntent = AndroidIntent(
+              action: 'android.intent.action.VIEW',
+              package: 'com.estrongs.android.pop',
+              componentName: 'com.estrongs.android.pop.view.FileExplorerActivity',
+              data: 'file://$folderPath',
+              flags: <int>[0x10000000], // FLAG_ACTIVITY_NEW_TASK
+            );
+
+            await esIntent.launch();
+            result = true;
+
+            if (kDebugMode) {
+              print("[OpenFolder] 使用ES文件浏览器打开文件夹");
+            }
+          } catch (e2) {
+            // 如果ES文件浏览器不可用，尝试使用系统文件管理器
+            if (kDebugMode) {
+              print("[OpenFolder] ES文件浏览器不可用: $e2，尝试使用系统文件管理器");
+            }
+
+            try {
+              // 尝试方法3: 使用系统文件管理器
+              final documentIntent = AndroidIntent(
+                action: 'android.intent.action.VIEW',
+                type: 'resource/folder',
+                data: 'content://com.android.externalstorage.documents/document/primary:${folderPath.replaceAll('/storage/emulated/0/', '')}',
+                flags: <int>[0x10000000], // FLAG_ACTIVITY_NEW_TASK
+              );
+
+              await documentIntent.launch();
+              result = true;
+
+              if (kDebugMode) {
+                print("[OpenFolder] 使用系统文件管理器打开文件夹");
+              }
+            } catch (e3) {
+              // 如果所有方法都失败，显示一个对话框，让用户手动导航
+              if (kDebugMode) {
+                print("[OpenFolder] 所有方法都失败: $e3，显示路径信息");
+              }
+
+              // 打开默认文件管理器
+              result = await launchUrl(
+                Uri.parse('content://com.android.externalstorage.documents/root/primary'),
+                mode: LaunchMode.externalApplication,
+              );
+
+              // 显示路径信息，帮助用户手动导航
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('请手动导航到以下路径: $folderPath'),
+                    duration: const Duration(seconds: 10),
+                    action: SnackBarAction(
+                      label: '复制路径',
+                      onPressed: () {
+                        // 复制路径到剪贴板
+                        Clipboard.setData(ClipboardData(text: folderPath));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('路径已复制到剪贴板')),
+                        );
+                      },
+                    ),
+                  ),
+                );
+              }
+            }
+          }
+        }
+      } else {
+        // iOS 和其他平台
+        result = await launchUrl(
+          Uri.directory(folderPath),
+          mode: LaunchMode.externalApplication,
+        );
+      }
 
       if (!result && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -748,6 +934,10 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
         );
       }
     } catch (e) {
+      if (kDebugMode) {
+        print("[OpenFolder] 打开文件夹失败: $e");
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('打开文件夹失败: $e')),
@@ -814,12 +1004,12 @@ class _DownloadRecordsScreenState extends ConsumerState<DownloadRecordsScreen> {
         return;
       }
 
-      // 打开文件查看器
+      // 打开文件列表查看器
       if (mounted) {
         await Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => FileViewerScreen(
+            builder: (context) => FileListViewerScreen(
               title: record.albumName,
               files: filePaths,
             ),

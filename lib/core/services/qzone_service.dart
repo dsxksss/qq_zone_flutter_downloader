@@ -1188,7 +1188,9 @@ class QZoneService {
                 }
 
                 if (kDebugMode && videoUrl != null) {
-                  print("[QZoneService] 找到视频URL: $videoUrl");
+                  if (kDebugMode) {
+                    print("[QZoneService] 找到视频URL: $videoUrl");
+                  }
                 }
               }
 
@@ -1405,9 +1407,7 @@ class QZoneService {
       cancelToken = _downloadCancelTokens[downloadId];
 
       // 如果没有找到现有的cancelToken，创建一个新的
-      if (cancelToken == null) {
-        cancelToken = registerDownload(downloadId);
-      }
+      cancelToken ??= registerDownload(downloadId);
     }
 
     try {

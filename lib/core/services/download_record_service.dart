@@ -40,7 +40,9 @@ class DownloadRecordService {
       _isInitialized = true;
 
       if (kDebugMode && forceReload) {
-        print("[DownloadRecordService] 强制重新加载记录，共加载 ${_records.length} 条记录");
+        if (kDebugMode) {
+          print("[DownloadRecordService] 强制重新加载记录，共加载 ${_records.length} 条记录");
+        }
       }
     } catch (e) {
       if (kDebugMode) {
@@ -353,5 +355,29 @@ class DownloadRecordService {
     await initialize();
 
     return _records.where((r) => r.albumId == albumId).toList();
+  }
+
+  // 检查相册是否已经下载过（包括已完成和正在下载的）
+  Future<DownloadRecord?> hasAlbumBeenDownloaded(String albumId) async {
+    await initialize();
+
+    try {
+      // 先检查是否有完成的下载记录
+      final completedRecord = _records.firstWhere(
+        (r) => r.albumId == albumId && r.isComplete && r.successCount > 0,
+      );
+      return completedRecord;
+    } catch (e) {
+      // 没有找到完成的记录，检查是否有正在进行的下载
+      try {
+        final activeRecord = _records.firstWhere(
+          (r) => r.albumId == albumId && !r.isComplete,
+        );
+        return activeRecord;
+      } catch (e) {
+        // 没有找到任何记录
+        return null;
+      }
+    }
   }
 }

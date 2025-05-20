@@ -4,19 +4,20 @@ import 'package:flutter/material.dart';
 import 'package:forui/forui.dart';
 import 'package:path/path.dart' as p;
 import 'package:photo_view/photo_view.dart';
-import 'package:photo_view/photo_view_gallery.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 
 class FileViewerScreen extends StatefulWidget {
   final String title;
   final List<String> files;
+  final int initialIndex;
 
   const FileViewerScreen({
-    Key? key,
+    super.key,
     required this.title,
     required this.files,
-  }) : super(key: key);
+    this.initialIndex = 0,
+  });
 
   @override
   State<FileViewerScreen> createState() => _FileViewerScreenState();
@@ -32,8 +33,9 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: 0);
-    _loadFileAtIndex(0);
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+    _loadFileAtIndex(widget.initialIndex);
   }
 
   @override

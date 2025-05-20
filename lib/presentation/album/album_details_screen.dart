@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qq_zone_flutter_downloader/core/models/album.dart';
 import 'package:qq_zone_flutter_downloader/core/models/photo.dart';
 import 'package:qq_zone_flutter_downloader/core/providers/service_providers.dart';
+import 'package:qq_zone_flutter_downloader/core/providers/download_manager_provider.dart'; // 导入下载管理器
 import 'package:photo_view/photo_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_player/video_player.dart';
@@ -234,12 +235,31 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
 
         // 直接使用下载方法，而不是反射调用私有方法
         final tempDir = await getTemporaryDirectory();
-        final result = await qzoneService.downloadAlbum(
-          album: widget.album,
-          savePath: tempDir.path,
-          targetUin: widget.targetUin,
-          skipExisting: true,
-        );
+
+        // 这里是为了获取照片列表，所以即使相册已下载过也要继续
+        // 使用 try-catch 捕获可能的 AlbumAlreadyDownloadedException 异常
+        Map<String, dynamic> result;
+        try {
+          result = await qzoneService.downloadAlbum(
+            album: widget.album,
+            savePath: tempDir.path,
+            targetUin: widget.targetUin,
+            skipExisting: true,
+          );
+        } catch (downloadError) {
+          // 如果是相册已下载的异常，我们可以忽略，因为这里只是为了获取照片列表
+          if (kDebugMode) {
+            print("[AlbumDetails] 下载相册时出现异常，但我们将继续尝试获取照片列表: $downloadError");
+          }
+
+          // 创建一个空结果，表示没有成功下载任何照片
+          result = {
+            'success': 0,
+            'failed': 0,
+            'skipped': 0,
+            'total': 0,
+          };
+        }
 
         if (result['success'] > 0 && mounted) {
           // 重新加载照片列表
@@ -413,7 +433,7 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
     );
   }
 
-  Future<void> _downloadAlbum() async {
+  Future<void> _downloadAlbum({bool forceDownload = false}) async {
     if (_isDownloading) return;
 
     setState(() {
@@ -458,48 +478,114 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
       // 获取保存路径
       final savePath = await _getPhotoSaveDirectory();
 
-      // 使用下载管理器开始下载 - 移除await，让下载在后台进行
+      // 使用下载管理器开始下载
       final downloadManager = ref.read(downloadManagerProvider.notifier);
-      downloadManager.downloadAlbum(
-        album: widget.album,
-        savePath: savePath,
-        targetUin: widget.targetUin,
-        skipExisting: true,
-      );
 
-      // 立即更新UI状态，不等待下载完成
-      if (mounted) {
-        setState(() {
-          _isDownloading = false;
-        });
-
-        // 显示开始下载的通知
-        showDialog(
-          context: context,
-          builder: (context) => FDialog(
-            title: const Text('下载开始'),
-            body: Text('已开始下载"${widget.album.name}"，可在下载记录中查看进度'),
-            actions: [
-              FButton(
-                style: FButtonStyle.outline,
-                onPress: () => Navigator.of(context).pop(),
-                child: const Text('关闭'),
-              ),
-              FButton(
-                onPress: () {
-                  Navigator.of(context).pop();
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const DownloadRecordsScreen(),
-                    ),
-                  );
-                },
-                child: const Text('查看'),
-              ),
-            ],
-          ),
+      try {
+        await downloadManager.downloadAlbum(
+          album: widget.album,
+          savePath: savePath,
+          targetUin: widget.targetUin,
+          skipExisting: true,
+          forceDownload: forceDownload,
         );
+
+        // 立即更新UI状态，不等待下载完成
+        if (mounted) {
+          setState(() {
+            _isDownloading = false;
+          });
+
+          // 显示开始下载的通知
+          showDialog(
+            context: context,
+            builder: (context) => FDialog(
+              title: const Text('下载开始'),
+              body: Text('已开始下载"${widget.album.name}"，可在下载记录中查看进度'),
+              actions: [
+                FButton(
+                  style: FButtonStyle.outline,
+                  onPress: () => Navigator.of(context).pop(),
+                  child: const Text('关闭'),
+                ),
+                FButton(
+                  onPress: () {
+                    Navigator.of(context).pop();
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const DownloadRecordsScreen(),
+                      ),
+                    );
+                  },
+                  child: const Text('查看'),
+                ),
+              ],
+            ),
+          );
+        }
+      } catch (e) {
+        // 检查是否是相册已下载的异常
+        if (e is AlbumAlreadyDownloadedException && mounted) {
+          setState(() {
+            _isDownloading = false;
+          });
+
+          // 显示确认对话框，询问是否重新下载
+          final result = await showDialog<bool>(
+            context: context,
+            builder: (context) => FDialog(
+              title: const Text('相册已下载'),
+              body: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('相册"${widget.album.name}"已经下载过。'),
+                  const SizedBox(height: 8),
+                  Text(
+                    '下载时间: ${e.existingRecord.formattedDownloadTime}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  Text(
+                    '状态: ${e.existingRecord.statusText}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: e.existingRecord.statusText == '下载完成'
+                          ? Colors.green
+                          : Colors.orange
+                    ),
+                  ),
+                  Text(
+                    '保存位置: ${e.existingRecord.savePath}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
+              actions: [
+                FButton(
+                  style: FButtonStyle.outline,
+                  onPress: () => Navigator.of(context).pop(false),
+                  child: const Text('取消'),
+                ),
+                FButton(
+                  onPress: () => Navigator.of(context).pop(true),
+                  child: const Text('重新下载'),
+                ),
+              ],
+            ),
+          );
+
+          // 如果用户选择重新下载
+          if (result == true) {
+            // 递归调用，但设置强制下载标志
+            return _downloadAlbum(forceDownload: true);
+          }
+
+          return; // 用户取消，直接返回
+        } else {
+          // 其他异常，继续抛出
+          rethrow;
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -563,7 +649,7 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(8.0),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.05),
+                  color: Colors.blue.withValues(red: 0, green: 0, blue: 255, alpha: 0.05),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Column(
