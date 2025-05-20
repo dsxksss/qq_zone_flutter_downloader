@@ -99,12 +99,6 @@ class _FileListViewerScreenState extends State<FileListViewerScreen> {
             onPressed: _openFolder,
             tooltip: '打开文件夹',
           ),
-          // 刷新按钮
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadFileItems,
-            tooltip: '刷新',
-          ),
         ],
       ),
       body: _buildBody(),
@@ -112,35 +106,56 @@ class _FileListViewerScreenState extends State<FileListViewerScreen> {
   }
 
   Widget _buildBody() {
+    return RefreshIndicator(
+      onRefresh: _loadFileItems,
+      child: _buildContent(),
+    );
+  }
+
+  Widget _buildContent() {
     if (_isLoading) {
-      return const Center(child: FProgress());
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const [
+          SizedBox(height: 100),
+          Center(child: FProgress()),
+        ],
+      );
     }
 
     if (_errorMessage != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, color: Colors.red, size: 48),
-            const SizedBox(height: 16),
-            Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 16),
-            FButton(
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(height: MediaQuery.of(context).size.height * 0.3),
+          const Center(child: Icon(Icons.error_outline, color: Colors.red, size: 48)),
+          const SizedBox(height: 16),
+          Center(child: Text(_errorMessage!, style: const TextStyle(color: Colors.red))),
+          const SizedBox(height: 16),
+          Center(
+            child: FButton(
               onPress: _loadFileItems,
               child: const Text('重试'),
             ),
-          ],
-        ),
+          ),
+        ],
       );
     }
 
     if (_fileItems.isEmpty) {
-      return const Center(
-        child: Text('没有找到可显示的文件'),
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(height: MediaQuery.of(context).size.height * 0.4),
+          const Center(
+            child: Text('没有找到可显示的文件'),
+          ),
+        ],
       );
     }
 
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
       itemCount: _fileItems.length,
       itemBuilder: (context, index) {
         final item = _fileItems[index];

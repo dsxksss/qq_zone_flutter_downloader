@@ -434,13 +434,8 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
   }
 
   Future<void> _downloadAlbum({bool forceDownload = false}) async {
+    // 防止重复点击
     if (_isDownloading) return;
-
-    setState(() {
-      _isDownloading = true;
-      _downloadProgress = 0.0;
-      _downloadMessage = '准备下载...';
-    });
 
     try {
       // 检查存储权限
@@ -482,26 +477,13 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
       final downloadManager = ref.read(downloadManagerProvider.notifier);
 
       try {
-        await downloadManager.downloadAlbum(
-          album: widget.album,
-          savePath: savePath,
-          targetUin: widget.targetUin,
-          skipExisting: true,
-          forceDownload: forceDownload,
-        );
-
-        // 立即更新UI状态，不等待下载完成
+        // 立即显示已添加到下载列表的对话框
         if (mounted) {
-          setState(() {
-            _isDownloading = false;
-          });
-
-          // 显示开始下载的通知
           showDialog(
             context: context,
             builder: (context) => FDialog(
-              title: const Text('下载开始'),
-              body: Text('已开始下载"${widget.album.name}"，可在下载记录中查看进度'),
+              title: const Text('已添加到下载列表'),
+              body: Text('相册"${widget.album.name}"已添加到下载列表，可在下载记录中查看进度'),
               actions: [
                 FButton(
                   style: FButtonStyle.outline,
@@ -524,13 +506,19 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
             ),
           );
         }
+
+        // 开始下载任务
+        await downloadManager.downloadAlbum(
+          album: widget.album,
+          savePath: savePath,
+          targetUin: widget.targetUin,
+          skipExisting: true,
+          forceDownload: forceDownload,
+        );
+
       } catch (e) {
         // 检查是否是相册已下载的异常
         if (e is AlbumAlreadyDownloadedException && mounted) {
-          setState(() {
-            _isDownloading = false;
-          });
-
           // 显示确认对话框，询问是否重新下载
           final result = await showDialog<bool>(
             context: context,
@@ -589,10 +577,6 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _isDownloading = false;
-        });
-
         showDialog(
           context: context,
           builder: (context) => FDialog(
@@ -696,205 +680,228 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
               ),
 
             // 照片内容
-            if (_isLoading)
-              const Expanded(
-                child: Center(
-                  child: FProgress(),
-                ),
-              )
-            else if (_errorMessage != null)
-              Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        _errorMessage!.contains("加密相册")
-                            ? Icons.lock
-                            : Icons.error,
-                        color: _errorMessage!.contains("加密相册")
-                            ? Colors.amber
-                            : Colors.red,
-                        size: 48,
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: _errorMessage!.contains("加密相册")
-                              ? Colors.amber.withValues(
-                                  red: 255, green: 193, blue: 7, alpha: 0.1)
-                              : Colors.red.withValues(
-                                  red: 255, green: 0, blue: 0, alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          _errorMessage!,
-                          style: TextStyle(
-                            color: _errorMessage!.contains("加密相册")
-                                ? Colors.amber[900]
-                                : Colors.red,
-                            fontSize: 14,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          FButton(
-                            onPress: _loadPhotos,
-                            child: const Text("重试"),
-                          ),
-                          const SizedBox(width: 16),
-                          if (_errorMessage!.contains("加密相册"))
-                            FButton(
-                              onPress: _downloadAlbum,
-                              child: const Text("尝试下载"),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else if (_photos.isEmpty)
-              const Expanded(
-                child: Center(
-                  child: Text("该相册没有照片"),
-                ),
-              )
-            else
-              Expanded(
-                child: GridView.builder(
-                  controller: _scrollController,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 1.0,
-                    crossAxisSpacing: 8.0,
-                    mainAxisSpacing: 8.0,
-                  ),
-                  itemCount:
-                      _isLoadingMore ? _photos.length + 1 : _photos.length,
-                  itemBuilder: (context, index) {
-                    // 显示加载更多指示器
-                    if (_isLoadingMore && index == _photos.length) {
-                      return const Card(
-                        child: Center(
-                          child: FProgress(),
-                        ),
-                      );
-                    }
-
-                    final photo = _photos[index];
-                    return Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: InkWell(
-                        onTap: () => _openGallery(index),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            // 缩略图
-                            if (photo.thumbUrl != null)
-                              CachedNetworkImage(
-                                imageUrl: photo.thumbUrl!,
-                                fit: BoxFit.cover,
-                                imageBuilder: (context, imageProvider) {
-                                  // 尝试使用自定义图片加载器
-                                  return Image(
-                                    image: QzoneImageProvider(
-                                        photo.thumbUrl!, ref),
-                                    fit: BoxFit.cover,
-                                    errorBuilder:
-                                        (context, error, stackTrace) =>
-                                            Container(
-                                      color: Colors.grey[300],
-                                      child: const Icon(
-                                        Icons.broken_image,
-                                        size: 50,
-                                        color: Colors.grey,
-                                      ),
-                                    ),
-                                  );
-                                },
-                                placeholder: (context, url) => const Center(
-                                  child: FProgress(),
-                                ),
-                                errorWidget: (context, url, error) => Container(
-                                  color: Colors.grey[300],
-                                  child: const Icon(
-                                    Icons.broken_image,
-                                    size: 50,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              )
-                            else
-                              Container(
-                                color: Colors.grey[300],
-                                child: const Icon(
-                                  Icons.photo,
-                                  size: 50,
-                                  color: Colors.grey,
-                                ),
-                              ),
-
-                            // 视频标识
-                            if (photo.isVideo)
-                              Positioned.fill(
-                                child: Center(
-                                  child: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withValues(
-                                          red: 0,
-                                          green: 0,
-                                          blue: 0,
-                                          alpha: 0.6),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.play_circle_filled,
-                                      color: Colors.white,
-                                      size: 32,
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                            // 照片名称
-                            Positioned(
-                              bottom: 0,
-                              left: 0,
-                              right: 0,
-                              child: Container(
-                                padding: const EdgeInsets.all(4.0),
-                                color: Colors.black.withValues(
-                                    red: 0, green: 0, blue: 0, alpha: 0.5),
-                                child: Text(
-                                  photo.isVideo
-                                      ? "【视频】${photo.name}"
-                                      : photo.name,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _loadPhotos,
+                child: _buildPhotoContent(),
               ),
+            ),
           ],
         ),
       ),
+    );
+  }
+
+  // 构建照片内容
+  Widget _buildPhotoContent() {
+    if (_isLoading) {
+      return const Center(
+        child: FProgress(),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(
+            height: MediaQuery.of(context).size.height * 0.3,
+          ),
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  _errorMessage!.contains("加密相册")
+                      ? Icons.lock
+                      : Icons.error,
+                  color: _errorMessage!.contains("加密相册")
+                      ? Colors.amber
+                      : Colors.red,
+                  size: 48,
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _errorMessage!.contains("加密相册")
+                        ? Colors.amber.withValues(
+                            red: 255, green: 193, blue: 7, alpha: 0.1)
+                        : Colors.red.withValues(
+                            red: 255, green: 0, blue: 0, alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _errorMessage!,
+                    style: TextStyle(
+                      color: _errorMessage!.contains("加密相册")
+                          ? Colors.amber[900]
+                          : Colors.red,
+                      fontSize: 14,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FButton(
+                      onPress: _loadPhotos,
+                      child: const Text("重试"),
+                    ),
+                    const SizedBox(width: 16),
+                    if (_errorMessage!.contains("加密相册"))
+                      FButton(
+                        onPress: _downloadAlbum,
+                        child: const Text("尝试下载"),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (_photos.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(
+            height: MediaQuery.of(context).size.height * 0.4,
+          ),
+          const Center(
+            child: Text("该相册没有照片"),
+          ),
+        ],
+      );
+    }
+
+    return GridView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      controller: _scrollController,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 1.0,
+        crossAxisSpacing: 8.0,
+        mainAxisSpacing: 8.0,
+      ),
+      itemCount: _isLoadingMore ? _photos.length + 1 : _photos.length,
+      itemBuilder: (context, index) {
+        // 显示加载更多指示器
+        if (_isLoadingMore && index == _photos.length) {
+          return const Card(
+            child: Center(
+              child: FProgress(),
+            ),
+          );
+        }
+
+        final photo = _photos[index];
+        return Card(
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => _openGallery(index),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // 缩略图
+                if (photo.thumbUrl != null)
+                  CachedNetworkImage(
+                    imageUrl: photo.thumbUrl!,
+                    fit: BoxFit.cover,
+                    imageBuilder: (context, imageProvider) {
+                      // 尝试使用自定义图片加载器
+                      return Image(
+                        image: QzoneImageProvider(
+                            photo.thumbUrl!, ref),
+                        fit: BoxFit.cover,
+                        errorBuilder:
+                            (context, error, stackTrace) =>
+                                Container(
+                          color: Colors.grey[300],
+                          child: const Icon(
+                            Icons.broken_image,
+                            size: 50,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      );
+                    },
+                    placeholder: (context, url) => const Center(
+                      child: FProgress(),
+                    ),
+                    errorWidget: (context, url, error) => Container(
+                      color: Colors.grey[300],
+                      child: const Icon(
+                        Icons.broken_image,
+                        size: 50,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    color: Colors.grey[300],
+                    child: const Icon(
+                      Icons.photo,
+                      size: 50,
+                      color: Colors.grey,
+                    ),
+                  ),
+
+                // 视频标识
+                if (photo.isVideo)
+                  Positioned.fill(
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(
+                              red: 0,
+                              green: 0,
+                              blue: 0,
+                              alpha: 0.6),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.play_circle_filled,
+                          color: Colors.white,
+                          size: 32,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // 照片名称
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(4.0),
+                    color: Colors.black.withValues(
+                        red: 0, green: 0, blue: 0, alpha: 0.5),
+                    child: Text(
+                      photo.isVideo
+                          ? "【视频】${photo.name}"
+                          : photo.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

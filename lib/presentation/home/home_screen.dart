@@ -406,94 +406,242 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
 
-          // 相册列表标题和刷新按钮
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                _selectedFriendUin != null ? '好友相册' : '我的相册',
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              FButton(
-                style: FButtonStyle.outline,
-                onPress: _isLoadingAlbums ? null : _loadAlbums,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.refresh, size: 16),
-                    const SizedBox(width: 4),
-                    const Text('刷新'),
-                  ],
-                ),
-              ),
-            ],
+          // 相册列表标题
+          Text(
+            _selectedFriendUin != null ? '好友相册' : '我的相册',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
 
           const SizedBox(height: 16),
 
           // 相册列表内容
           Expanded(
-            child: _isLoadingAlbums
-                ? const Center(child: FProgress())
-                : _albumError != null
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
+            child: RefreshIndicator(
+              onRefresh: _loadAlbums,
+              child: _isLoadingAlbums
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: const [
+                        SizedBox(height: 100),
+                        Center(child: FProgress()),
+                      ],
+                    )
+                  : _albumError != null
+                      ? ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
                           children: [
-                            Text(
-                              _albumError!,
-                              style: const TextStyle(color: Colors.red),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 16),
-                            FButton(
-                              onPress: _loadAlbums,
-                              child: const Text("重试"),
+                            SizedBox(height: 100),
+                            Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    _albumError!,
+                                    style: const TextStyle(color: Colors.red),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  FButton(
+                                    onPress: _loadAlbums,
+                                    child: const Text("重试"),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
-                        ),
-                      )
-                    : _albums.isEmpty
-                        ? const Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.folder_open,
-                                  size: 54,
-                                  color: Colors.grey,
-                                ),
-                                SizedBox(height: 16),
-                                Text(
-                                  "没有找到相册",
-                                  style: TextStyle(
-                                      fontSize: 16, color: Colors.grey),
+                        )
+                      : _albums.isEmpty
+                          ? ListView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              children: const [
+                                SizedBox(height: 100),
+                                Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.folder_open,
+                                        size: 54,
+                                        color: Colors.grey,
+                                      ),
+                                      SizedBox(height: 16),
+                                      Text(
+                                        "没有找到相册",
+                                        style: TextStyle(
+                                            fontSize: 16, color: Colors.grey),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ],
+                            )
+                          : GridView.builder(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                                childAspectRatio: 0.8,
+                              ),
+                              itemCount: _albums.length,
+                              padding: EdgeInsets.zero,
+                              itemBuilder: (context, index) {
+                                if (index >= _albums.length) {
+                                  return const SizedBox(); // 防止索引越界
+                                }
+                                final album = _albums[index];
+                                return _buildAlbumCard(album);
+                              },
                             ),
-                          )
-                        : GridView.builder(
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              crossAxisSpacing: 12,
-                              mainAxisSpacing: 12,
-                              childAspectRatio: 0.8,
-                            ),
-                            itemCount: _albums.length,
-                            padding: EdgeInsets.zero,
-                            itemBuilder: (context, index) {
-                              if (index >= _albums.length) {
-                                return const SizedBox(); // 防止索引越界
-                              }
-                              final album = _albums[index];
-                              return _buildAlbumCard(album);
-                            },
-                          ),
+            ),
           ),
         ],
       ),
+    );
+  }
+
+  // 构建好友内容
+  Widget _buildFriendsContent() {
+    if (_isLoadingFriends) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const [
+          SizedBox(height: 100),
+          Center(child: FProgress()),
+        ],
+      );
+    }
+
+    if (_friendError != null) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(height: 100),
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  '加载好友失败: $_friendError',
+                  style: const TextStyle(color: Colors.red),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                FButton(
+                  onPress: _loadFriends,
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    // 显示好友列表
+    if (_filteredFriends.isNotEmpty) {
+      return ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: _filteredFriends.length,
+        itemBuilder: (context, index) {
+          final friend = _filteredFriends[index];
+          return Card(
+            margin: const EdgeInsets.only(bottom: 8.0),
+            elevation: 2,
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16.0,
+                vertical: 8.0,
+              ),
+              title: Text(
+                friend.nickname,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              subtitle: Text('QQ: ${friend.uin}'),
+              leading: ClipOval(
+                child: Container(
+                  width: 48,
+                  height: 48,
+                  color: Colors.grey[200],
+                  child: friend.avatarUrl != null
+                      ? Image.network(
+                          friend.avatarUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Icon(
+                            Icons.person,
+                            size: 32,
+                            color: Colors.grey,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.person,
+                          size: 32,
+                          color: Colors.grey,
+                        ),
+                ),
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 16),
+              onTap: () => _selectFriend(friend),
+            ),
+          );
+        },
+      );
+    }
+
+    if (_searchController.text.isNotEmpty && _filteredFriends.isEmpty) {
+      // 搜索无结果的提示
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const [
+          SizedBox(height: 100),
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.person_off,
+                  size: 54,
+                  color: Colors.grey,
+                ),
+                SizedBox(height: 16),
+                Text(
+                  '没有找到匹配的好友',
+                  style: TextStyle(fontSize: 16, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    // 没有好友的提示
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: const [
+        SizedBox(height: 100),
+        Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.group,
+                size: 54,
+                color: Colors.grey,
+              ),
+              SizedBox(height: 16),
+              Text(
+                '没有找到好友',
+                style: TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -528,155 +676,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
           const SizedBox(height: 16),
 
-          // 好友列表标题和刷新按钮
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // 好友列表标题
+          const Row(
             children: [
-              const Row(
-                children: [
-                  Icon(Icons.people, size: 18),
-                  SizedBox(width: 8),
-                  Text(
-                    '好友列表',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-              FButton(
-                style: FButtonStyle.outline,
-                onPress: _isLoadingFriends ? null : _loadFriends,
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.refresh, size: 14),
-                    SizedBox(width: 4),
-                    Text('刷新'),
-                  ],
-                ),
+              Icon(Icons.people, size: 18),
+              SizedBox(width: 8),
+              Text(
+                '好友列表',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ],
           ),
 
           const SizedBox(height: 8),
 
-          if (_isLoadingFriends)
-            const Expanded(
-              child: Center(child: FProgress()),
-            )
-          else if (_friendError != null)
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      '加载好友失败: $_friendError',
-                      style: const TextStyle(color: Colors.red),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    FButton(
-                      onPress: _loadFriends,
-                      child: const Text('重试'),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          // 显示好友列表
-          else if (_filteredFriends.isNotEmpty)
-            Expanded(
-              child: ListView.builder(
-                itemCount: _filteredFriends.length,
-                itemBuilder: (context, index) {
-                  final friend = _filteredFriends[index];
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 8.0),
-                    elevation: 2,
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16.0,
-                        vertical: 8.0,
-                      ),
-                      title: Text(
-                        friend.nickname,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      subtitle: Text('QQ: ${friend.uin}'),
-                      leading: ClipOval(
-                        child: Container(
-                          width: 48,
-                          height: 48,
-                          color: Colors.grey[200],
-                          child: friend.avatarUrl != null
-                              ? Image.network(
-                                  friend.avatarUrl!,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      const Icon(
-                                    Icons.person,
-                                    size: 32,
-                                    color: Colors.grey,
-                                  ),
-                                )
-                              : const Icon(
-                                  Icons.person,
-                                  size: 32,
-                                  color: Colors.grey,
-                                ),
-                        ),
-                      ),
-                      trailing: const Icon(Icons.chevron_right, size: 16),
-                      onTap: () => _selectFriend(friend),
-                    ),
-                  );
-                },
-              ),
-            )
-          else if (_searchController.text.isNotEmpty &&
-              _filteredFriends.isEmpty)
-            // 搜索无结果的提示
-            const Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.person_off,
-                      size: 54,
-                      color: Colors.grey,
-                    ),
-                    SizedBox(height: 16),
-                    Text(
-                      '没有找到匹配的好友',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            const Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.group,
-                      size: 54,
-                      color: Colors.grey,
-                    ),
-                    SizedBox(height: 16),
-                    Text(
-                      '没有找到好友',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _loadFriends,
+              child: _buildFriendsContent(),
             ),
+          ),
         ],
       ),
     );
