@@ -580,6 +580,72 @@ class QZoneService {
       // 获取完整Cookie
       final cookieString =
           await _getFullCookieString('https://user.qzone.qq.com/');
+          
+      // 使用Go版本的API URL - 完全匹配Go实现
+      final goStyleUrl = 'https://user.qzone.qq.com/proxy/domain/photo.qzone.qq.com/fcgi-bin/fcg_list_album_v3?g_tk=$_gTk&callback=shine_Callback&hostUin=$uin&uin=$_loggedInUin&appid=4&inCharset=utf-8&outCharset=utf-8&source=qzone&plat=qzone&format=jsonp&notice=0&filter=1&handset=4&pageNumModeSort=40&pageNumModeClass=15&needUserInfo=1&idcNum=4&callbackFun=shine';
+      
+      if (kDebugMode) {
+        print("[QZoneService DEBUG] 使用Go风格URL: $goStyleUrl");
+      }
+      
+      final goStyleResponse = await _dio.get(
+        goStyleUrl,
+        options: Options(
+          responseType: ResponseType.plain,
+          validateStatus: (status) {
+            return status != null;
+          },
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+            'Referer': 'https://user.qzone.qq.com/$uin',
+            'Cookie': cookieString,
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          },
+        ),
+      );
+
+      if (kDebugMode) {
+        print("[QZoneService DEBUG] Go风格API响应状态码: ${goStyleResponse.statusCode}");
+      }
+
+      if (goStyleResponse.data != null && goStyleResponse.data.toString().isNotEmpty) {
+        final String responseText = goStyleResponse.data.toString();
+        
+        // 解析JSONP格式(类似shine_Callback({json数据}))
+        try {
+          // 尝试提取JSON数据
+          final callbackMatch = RegExp(r'shine_Callback\((.*)\)').firstMatch(responseText);
+          if (callbackMatch != null && callbackMatch.groupCount >= 1) {
+            final jsonStr = callbackMatch.group(1);
+            if (jsonStr != null && jsonStr.isNotEmpty) {
+              final jsonData = jsonDecode(jsonStr);
+              
+              if (jsonData['code'] == 0) {
+                final List<Album> albums = [];
+                final albumList = jsonData['data']?['albumList'] ?? [];
+                
+                if (albumList is List) {
+                  for (var item in albumList) {
+                    albums.add(Album.fromJson(item));
+                  }
+                  
+                  if (kDebugMode) {
+                    print("[QZoneService DEBUG] Go风格API成功解析相册数量: ${albums.length}");
+                  }
+                  return albums;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          if (kDebugMode) {
+            print("[QZoneService ERROR] Go风格API响应解析失败: $e");
+            print("[QZoneService ERROR] 响应内容: ${responseText.length > 100 ? responseText.substring(0, 100) + '...' : responseText}");
+          }
+        }
+      }
 
       // 主API - 相册列表V3
       final response = await _dio.get(
@@ -1413,6 +1479,75 @@ class QZoneService {
 
       // 获取完整Cookie
       final cookieString = await _getFullCookieString('https://user.qzone.qq.com/');
+
+      // Go版本API参考实现 - 好友列表
+      final goStyleUrl = 'https://user.qzone.qq.com/proxy/domain/r.qzone.qq.com/cgi-bin/tfriend/friend_show_qqfriends.cgi?uin=$_loggedInUin&follow_flag=0&groupface_flag=0&fupdate=1&g_tk=$_gTk&qzonetoken=&format=jsonp&callbackFun=shine';
+      
+      final goStyleResponse = await _dio.get(
+        goStyleUrl,
+        options: Options(
+          responseType: ResponseType.plain,
+          validateStatus: (status) {
+            return status != null;
+          },
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+            'Referer': 'https://user.qzone.qq.com/$_loggedInUin/infocenter',
+            'Cookie': cookieString,
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          },
+        ),
+      );
+
+      if (kDebugMode) {
+        print("[QZoneService DEBUG] Go风格API响应状态码: ${goStyleResponse.statusCode}");
+      }
+
+      if (goStyleResponse.data != null && goStyleResponse.data.toString().isNotEmpty) {
+        final String responseText = goStyleResponse.data.toString();
+        
+        // 解析JSONP格式(类似shine_Callback({json数据}))
+        try {
+          // 尝试提取JSON数据
+          final callbackMatch = RegExp(r'shine_Callback\((.*)\)').firstMatch(responseText);
+          if (callbackMatch != null && callbackMatch.groupCount >= 1) {
+            final jsonStr = callbackMatch.group(1);
+            if (jsonStr != null && jsonStr.isNotEmpty) {
+              final jsonData = jsonDecode(jsonStr);
+              
+              if (jsonData['code'] == 0) {
+                final List<Friend> friends = [];
+                final data = jsonData['data']?['items_list'] ?? [];
+                
+                if (data is List) {
+                  for (var item in data) {
+                    if (item['uin'].toString() != _loggedInUin) {
+                      // 过滤掉自己
+                      friends.add(Friend(
+                        uin: item['uin'].toString(),
+                        nickname: item['name'] ?? '未知好友',
+                        remark: item['remark'],
+                        avatarUrl: 'https://qlogo4.store.qq.com/qzone/${item['uin']}/${item['uin']}/100',
+                      ));
+                    }
+                  }
+                  
+                  if (kDebugMode) {
+                    print("[QZoneService DEBUG] Go风格API成功解析好友数量: ${friends.length}");
+                  }
+                  return friends;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          if (kDebugMode) {
+            print("[QZoneService ERROR] Go风格API响应解析失败: $e");
+          }
+        }
+      }
 
       // 主API - 好友列表
       final response = await _dio.get(
