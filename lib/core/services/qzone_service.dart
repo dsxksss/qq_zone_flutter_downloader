@@ -561,89 +561,164 @@ class QZoneService {
     return controller.stream;
   }
 
+  /// 检查API响应中的错误码
+  void _checkApiResponse(dynamic jsonData) {
+    if (jsonData is Map) {
+      final code = jsonData['code'];
+      final subcode = jsonData['subcode'];
+      final message = jsonData['message'] ?? '未知错误';
+      
+      // 检查登录失效
+      if (code == -3000 || subcode == -4001) {
+        throw QZoneLoginException('登录已失效，请重新登录: $message');
+      }
+      
+      // 其他错误码检查
+      if (code != null && code != 0) {
+        throw QZoneApiException('API请求失败: $message (code: $code, subcode: $subcode)');
+      }
+    }
+  }
+
+  /// 获取完整的Cookie字符串
+  Future<String> _getCookieString() async {
+    final cookies = await _cookieJar.loadForRequest(Uri.parse('https://user.qzone.qq.com/'));
+    return cookies.map((c) => '${c.name}=${c.value}').join('; ');
+  }
+
+  /// 获取相册列表
   Future<List<Album>> getAlbumList({String? targetUin}) async {
     if (!isLoggedIn) {
       throw QZoneApiException('未登录，请先登录');
     }
 
-    final uin = targetUin ?? _loggedInUin;
-    const String callbackFun = "shine"; // 与 Go 代码一致
-    const String callbackName = "${callbackFun}_Callback"; // 与 Go 代码一致
-
+    final cookieString = await _getCookieString();
+    
     try {
-      if (kDebugMode) {
-        print("[QZoneService DEBUG] 开始获取相册列表 (主API)");
-        print(
-            "[QZoneService DEBUG] 请求参数: targetUin=$targetUin, loggedInUin=$_loggedInUin, gTk=$_gTk");
+      // 尝试新API
+      final newApiResponse = await _dio.get(
+        'https://h5.qzone.qq.com/webapp/json/mqzone_photo/getPhotoList',
+        queryParameters: {
+          'uin': targetUin ?? _loggedInUin,
+          'g_tk': _gTk,
+          'format': 'json',
+          '_': DateTime.now().millisecondsSinceEpoch.toString(),
+        },
+        options: Options(
+          validateStatus: (status) {
+            return status != null;
+          },
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36',
+            'Referer': 'https://h5.qzone.qq.com/',
+            'Cookie': cookieString,
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
+        ),
+      );
+
+      if (newApiResponse.statusCode == 200 && newApiResponse.data != null) {
+        try {
+          final jsonData = jsonDecode(newApiResponse.data.toString());
+          // 检查API响应
+          _checkApiResponse(jsonData);
+          
+          if (jsonData['data'] != null) {
+            final List<Album> albums = [];
+            final data = jsonData['data']['albumList'] ?? [];
+            if (data is List && data.isNotEmpty) {
+              for (var item in data) {
+                albums.add(Album(
+                  id: item['id'].toString(),
+                  name: item['name'] ?? '未命名相册',
+                  desc: item['desc'] ?? '',
+                  coverUrl: item['coverUrl'],
+                  createTime: DateTime.fromMillisecondsSinceEpoch(
+                      (item['createTime'] ?? 0) * 1000),
+                  modifyTime: DateTime.fromMillisecondsSinceEpoch(
+                      (item['modifyTime'] ?? 0) * 1000),
+                  photoCount: item['photoCount'] ?? 0,
+                ));
+              }
+              return albums;
+            }
+          }
+        } catch (e) {
+          if (kDebugMode) {
+            print("[QZoneService ERROR] 新API JSON解析错误: $e");
+          }
+          rethrow;
+        }
       }
 
-      // 获取完整Cookie
-      final cookieString =
-          await _getFullCookieString('https://user.qzone.qq.com/');
-          
-      // 使用Go版本的API URL - 完全匹配Go实现
-      final goStyleUrl = 'https://user.qzone.qq.com/proxy/domain/photo.qzone.qq.com/fcgi-bin/fcg_list_album_v3?g_tk=$_gTk&callback=shine_Callback&hostUin=$uin&uin=$_loggedInUin&appid=4&inCharset=utf-8&outCharset=utf-8&source=qzone&plat=qzone&format=jsonp&notice=0&filter=1&handset=4&pageNumModeSort=40&pageNumModeClass=15&needUserInfo=1&idcNum=4&callbackFun=shine';
-      
-      if (kDebugMode) {
-        print("[QZoneService DEBUG] 使用Go风格URL: $goStyleUrl");
-      }
-      
-      final goStyleResponse = await _dio.get(
-        goStyleUrl,
+      // 如果新API失败，尝试旧的API
+      final lastResponse = await _dio.get(
+        'https://user.qzone.qq.com/proxy/domain/r.qzone.qq.com/cgi-bin/main_page_cgi',
+        queryParameters: {
+          'uin': targetUin ?? _loggedInUin,
+          'param': '3',
+          'g_tk': _gTk,
+          'qzonetoken': '',
+          'format': 'jsonp',
+          'callback': 'callback_${DateTime.now().millisecondsSinceEpoch}',
+          '_': DateTime.now().millisecondsSinceEpoch.toString(),
+        },
         options: Options(
-          responseType: ResponseType.plain,
           validateStatus: (status) {
             return status != null;
           },
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-            'Referer': 'https://user.qzone.qq.com/$uin',
+            'Referer': 'https://user.qzone.qq.com/',
             'Cookie': cookieString,
             'Accept': '*/*',
             'Accept-Encoding': 'gzip, deflate, br',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
           },
         ),
       );
 
-      if (kDebugMode) {
-        print("[QZoneService DEBUG] Go风格API响应状态码: ${goStyleResponse.statusCode}");
-      }
-
-      if (goStyleResponse.data != null && goStyleResponse.data.toString().isNotEmpty) {
-        final String responseText = goStyleResponse.data.toString();
-        
-        // 解析JSONP格式(类似shine_Callback({json数据}))
+      if (lastResponse.statusCode == 200 && lastResponse.data != null) {
         try {
-          // 尝试提取JSON数据
-          final callbackMatch = RegExp(r'shine_Callback\((.*)\)').firstMatch(responseText);
-          if (callbackMatch != null && callbackMatch.groupCount >= 1) {
-            final jsonStr = callbackMatch.group(1);
-            if (jsonStr != null && jsonStr.isNotEmpty) {
-              final jsonData = jsonDecode(jsonStr);
-              
-              if (jsonData['code'] == 0) {
-                final List<Album> albums = [];
-                final albumList = jsonData['data']?['albumList'] ?? [];
-                
-                if (albumList is List) {
-                  for (var item in albumList) {
-                    albums.add(Album.fromJson(item));
-                  }
-                  
-                  if (kDebugMode) {
-                    print("[QZoneService DEBUG] Go风格API成功解析相册数量: ${albums.length}");
-                  }
-                  return albums;
+          final String jsonText = lastResponse.data.toString();
+          final match = RegExp(r'callback_\d+\((.*)\)').firstMatch(jsonText);
+          if (match != null && match.groupCount >= 1) {
+            final jsonData = jsonDecode(match.group(1)!);
+            // 检查API响应
+            _checkApiResponse(jsonData);
+            
+            if (jsonData['data'] != null) {
+              final List<Album> albums = [];
+              final data = jsonData['data']['albumList'] ?? [];
+              if (data is List && data.isNotEmpty) {
+                for (var item in data) {
+                  albums.add(Album(
+                    id: item['id'].toString(),
+                    name: item['name'] ?? '未命名相册',
+                    desc: item['desc'] ?? '',
+                    coverUrl: item['coverUrl'],
+                    createTime: DateTime.fromMillisecondsSinceEpoch(
+                        (item['createTime'] ?? 0) * 1000),
+                    modifyTime: DateTime.fromMillisecondsSinceEpoch(
+                        (item['modifyTime'] ?? 0) * 1000),
+                    photoCount: item['photoCount'] ?? 0,
+                  ));
                 }
+                return albums;
               }
             }
           }
         } catch (e) {
           if (kDebugMode) {
-            print("[QZoneService ERROR] Go风格API响应解析失败: $e");
-            print("[QZoneService ERROR] 响应内容: ${responseText.length > 100 ? responseText.substring(0, 100) + '...' : responseText}");
+            print("[QZoneService ERROR] 旧API JSON解析错误: $e");
           }
+          rethrow;
         }
       }
 
@@ -652,7 +727,7 @@ class QZoneService {
         'https://h5.qzone.qq.com/proxy/domain/photo.qzone.qq.com/fcgi-bin/fcg_list_album_v3',
         queryParameters: {
           'g_tk': _gTk,
-          'hostUin': uin,
+          'hostUin': targetUin ?? _loggedInUin,
           'uin': _loggedInUin,
           'appid': '4',
           'inCharset': 'utf-8',
@@ -670,8 +745,8 @@ class QZoneService {
           'mode': '2',
           'pageStart': '0',
           'pageNum': '30',
-          'callback': callbackName,
-          'callbackFun': callbackFun,
+          'callback': 'shine_Callback',
+          'callbackFun': 'shine',
           '_': DateTime.now().millisecondsSinceEpoch.toString(), // 添加时间戳防止缓存
         },
         options: Options(
@@ -683,7 +758,7 @@ class QZoneService {
           headers: {
             'User-Agent':
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-            'Referer': 'https://user.qzone.qq.com/$uin',
+            'Referer': 'https://user.qzone.qq.com/${targetUin ?? _loggedInUin}',
             'Origin': 'https://user.qzone.qq.com',
             'Cookie': cookieString,
             'Accept': '*/*',
@@ -710,7 +785,7 @@ class QZoneService {
         }
 
         final String expectedPrefix =
-            "$callbackName("; // e.g., "shine_Callback("
+            "shine_Callback("; // e.g., "shine_Callback("
 
         if (responseData.startsWith(expectedPrefix)) {
           int lastParenIndex = responseData.lastIndexOf(')');
@@ -793,7 +868,7 @@ class QZoneService {
         'https://h5.qzone.qq.com/proxy/domain/photo.qzone.qq.com/fcgi-bin/fcg_list_album_v2',
         queryParameters: {
           'g_tk': _gTk,
-          'hostUin': uin,
+          'hostUin': targetUin ?? _loggedInUin,
           'uin': _loggedInUin,
           'format': 'jsonp',
           'inCharset': 'utf-8',
@@ -801,8 +876,8 @@ class QZoneService {
           'handset': '4',
           'pageNumModeSort': '40',
           'needUserInfo': '1',
-          'callback': callbackName,
-          'callbackFun': callbackFun,
+          'callback': 'shine_Callback',
+          'callbackFun': 'shine',
           '_': DateTime.now().millisecondsSinceEpoch.toString(), // 添加时间戳防止缓存
         },
         options: Options(
@@ -814,7 +889,7 @@ class QZoneService {
           headers: {
             'User-Agent':
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-            'Referer': 'https://user.qzone.qq.com/$uin',
+            'Referer': 'https://user.qzone.qq.com/${targetUin ?? _loggedInUin}',
             'Origin': 'https://user.qzone.qq.com',
             'Cookie': cookieString,
             'Accept': '*/*',
@@ -843,7 +918,7 @@ class QZoneService {
         }
 
         final String expectedPrefix =
-            "$callbackName("; // e.g., "shine_Callback("
+            "shine_Callback("; // e.g., "shine_Callback("
 
         if (backupResponseData.startsWith(expectedPrefix)) {
           int lastParenIndex = backupResponseData.lastIndexOf(')');
@@ -928,7 +1003,7 @@ class QZoneService {
             headers: {
               'User-Agent':
                   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-              'Referer': 'https://user.qzone.qq.com/$uin',
+              'Referer': 'https://user.qzone.qq.com/${targetUin ?? _loggedInUin}',
               'Cookie': cookieString,
               'Accept': '*/*',
               'Accept-Encoding': 'gzip, deflate, br',
@@ -3439,6 +3514,53 @@ class QZoneService {
         print("[QZoneService] 尝试备用视频URL方法失败: $e");
       }
       return null;
+    }
+  }
+
+  /// 从WebView的cookie字符串更新cookies
+  Future<void> updateCookiesFromString(String cookieString) async {
+    final uri = Uri.parse('https://user.qzone.qq.com/');
+    final cookies = cookieString.split(';').map((cookie) {
+      final parts = cookie.trim().split('=');
+      if (parts.length == 2) {
+        return Cookie(parts[0], parts[1]);
+      }
+      return null;
+    }).whereType<Cookie>();
+
+    // 更新cookie jar
+    await _cookieJar.saveFromResponse(uri, cookies.toList());
+
+    // 提取必要的信息
+    String? pSkey;
+    String? skeyForFallback;
+    String? pUin;
+
+    for (final cookie in cookies) {
+      if (cookie.name == 'p_skey') {
+        pSkey = cookie.value;
+      } else if (cookie.name == 'skey') {
+        skeyForFallback = cookie.value;
+      } else if (cookie.name == 'p_uin' || cookie.name == 'uin') {
+        pUin = cookie.value;
+      }
+    }
+
+    // 更新g_tk
+    if (pSkey != null && pSkey.isNotEmpty) {
+      _gTk = QZoneAlgorithms.calculateGtk(pSkey);
+    } else if (skeyForFallback != null && skeyForFallback.isNotEmpty) {
+      _gTk = QZoneAlgorithms.calculateGtk(skeyForFallback);
+    } else {
+      throw QZoneLoginException('登录失败：未能获取到必要的Cookie');
+    }
+
+    // 更新登录状态
+    if (pUin != null && pUin.isNotEmpty) {
+      _rawUin = pUin;
+      _loggedInUin = pUin.startsWith('o') ? pUin.substring(1) : pUin;
+    } else {
+      throw QZoneLoginException('登录失败：未能获取到用户QQ号');
     }
   }
 }

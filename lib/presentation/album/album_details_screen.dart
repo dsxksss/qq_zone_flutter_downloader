@@ -165,9 +165,9 @@ class _AlbumDetailsScreenState extends ConsumerState<AlbumDetailsScreen> {
   final ScrollController _scrollController = ScrollController();
 
   // 下载状态
-  bool _isDownloading = false;
-  double _downloadProgress = 0.0;
-  String _downloadMessage = '';
+  final bool _isDownloading = false;
+  final double _downloadProgress = 0.0;
+  final String _downloadMessage = '';
 
   @override
   void initState() {

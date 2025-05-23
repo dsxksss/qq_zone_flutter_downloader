@@ -9,6 +9,7 @@ import 'package:qq_zone_flutter_downloader/presentation/login/login_screen.dart'
 import 'package:qq_zone_flutter_downloader/presentation/album/album_details_screen.dart';
 import 'package:qq_zone_flutter_downloader/presentation/download/download_records_screen.dart';
 import 'package:qq_zone_flutter_downloader/core/providers/qzone_image_provider.dart'; // 导入QzoneImageProvider
+import 'package:qq_zone_flutter_downloader/core/models/qzone_api_exception.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   // 修改为 ConsumerStatefulWidget
@@ -130,6 +131,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         if (kDebugMode) {
           print("[HomeScreen DEBUG] Widget已经被销毁，不更新状态");
         }
+      }
+    } on QZoneLoginException catch (e) {
+      if (mounted) {
+        // 显示登录失效提示
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
+        );
+        // 重定向到登录页面
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+        );
       }
     } catch (e, stackTrace) {
       if (kDebugMode) {
