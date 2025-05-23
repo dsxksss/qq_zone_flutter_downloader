@@ -1,6 +1,5 @@
 import 'dart:async'; // For StreamSubscription
 import 'package:flutter/material.dart';
-import 'package:forui/forui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // Import Riverpod
 // import 'package:qr_flutter/qr_flutter.dart'; // Removed as unused
 import 'package:qq_zone_flutter_downloader/core/models/login_qr_result.dart';
@@ -9,6 +8,7 @@ import 'package:qq_zone_flutter_downloader/core/models/qzone_api_exception.dart'
 import 'package:qq_zone_flutter_downloader/presentation/home/home_screen.dart'; // Import HomeScreen
 import 'package:qq_zone_flutter_downloader/core/providers/service_providers.dart'; // Import provider
 import 'package:flutter/foundation.dart';
+import 'package:qq_zone_flutter_downloader/presentation/login/web_login_screen.dart'; // Import WebLoginScreen
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -172,66 +172,54 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // final fTheme = FTheme.of(context); // Your forui theme access
-
-    return FScaffold(
-      header: FHeader(
-        title: Text('QQ空间下载器登录'),
-        // Forui FHeader actions: According to forui.dev, FHeader does not have an 'actions' property.
-        // Common alternatives:
-        // 1. Use `trailing` property if FHeader supports it for a single widget.
-        // 2. Use a Row in the `title` if you need multiple actions (might get complex).
-        // 3. Place action buttons elsewhere in the FScaffold's body or a bottom navigation bar.
-        // For now, I'll remove the actions from FHeader to avoid Linter errors.
-        // You'll need to decide where to best place a refresh button based on forui's capabilities.
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('QQ空间下载器登录'),
       ),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: FCard(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  if (!isLoadingQr && _qrImageBytes == null)
-                    FButton(
-                      onPress: _fetchAndDisplayQrCode,
-                      child: const Text('获取登录二维码'),
-                    ),
-                  const SizedBox(height: 10),
-                  Text(
-                    loginStatus,
-                    textAlign: TextAlign.center,
-                    // style: TextStyle(fontSize: fTheme.fontSizes.md),
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: 200,
-                    height: 200,
-                    child: isLoadingQr &&
-                            _qrImageBytes ==
-                                null // Show progress only if QR not yet loaded
-                        ? const FProgress()
-                        : _qrImageBytes != null
-                            ? Image.memory(_qrImageBytes!)
-                            : Container(
-                                alignment: Alignment.center,
-                                // child: Text("二维码将显示在此"),
-                              ),
-                  ),
-                  const SizedBox(height: 24),
-                  if (errorMessage != null)
-                    Text(
-                      errorMessage!,
-                      // style: TextStyle(color: fTheme.colorScheme.error),
-                      textAlign: TextAlign.center,
-                    ),
-                ],
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (_qrImageBytes != null)
+              Image.memory(
+                _qrImageBytes!,
+                width: 200,
+                height: 200,
+              ),
+            const SizedBox(height: 20),
+            Text(
+              loginStatus,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: errorMessage != null ? Colors.red : Colors.black,
               ),
             ),
-          ),
+            if (errorMessage != null)
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Text(
+                  errorMessage!,
+                  style: const TextStyle(color: Colors.red),
+                ),
+              ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: isLoadingQr ? null : _fetchAndDisplayQrCode,
+              child: Text(isLoadingQr ? '获取中...' : '获取二维码'),
+            ),
+            const SizedBox(height: 20),
+            // 添加Web登录按钮
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const WebLoginScreen(),
+                  ),
+                );
+              },
+              child: const Text('使用QQ快速登录'),
+            ),
+          ],
         ),
       ),
     );
